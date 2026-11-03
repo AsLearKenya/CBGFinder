@@ -1,0 +1,205 @@
+/* Valuation samples and caches are independent of normal results and change notifications. */
+const materialPriceState={loading:false,record:null,error:''};let materialPricePromise=null,materialPriceRequestedServers=[];
+function materialDay(){return new Date(Date.now()+8*3600000).toISOString().slice(0,10);}
+async function loadMaterialPrices(){
+ if(materialPricePromise){
+  const requested=new Set(materialPriceRequestedServers),record=await materialPricePromise;
+  // A new role can be saved while the previous batch's server list is fixed.
+  const ids=[...new Set(availableRoles.map(role=>String(role.server?.id||'')))].filter(id=>/^\d+$/.test(id));
+  if(ids.some(id=>!requested.has(id)))return loadMaterialPrices();
+  return record;
+ }
+ const needed=[...new Set(availableRoles.map(role=>String(role.server?.id||'')))];
+ if(materialPriceState.record?.day===materialDay()&&needed.every(id=>materialPriceState.record.servers?.some(entry=>String(entry.serverId)===id&&entry.complete)))return materialPriceState.record;
+ materialPriceRequestedServers=needed;
+ const work=(async()=>{materialPriceState.loading=true;materialPriceState.error='';render();try{
+  const response=await fetch('/api/material-prices',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}),result=await response.json();if(!response.ok)throw Error(result.message||'材料报价加载失败');if(!Array.isArray(result.servers)||!Array.isArray(result.materials))throw Error('材料报价返回格式无效');materialPriceState.record=result;return result;
+ }catch(error){materialPriceState.error=error.message;throw error;}finally{materialPriceState.loading=false;render();}})();
+ materialPricePromise=work;try{return await work;}finally{if(materialPricePromise===work)materialPricePromise=null;}
+}
+let selectedMaterialServer='',materialGradeBand='5-10',materialFamily='gem',materialPriceSaving=false;
+function loggedMaterialServers(){return [...new Map(availableRoles.filter(role=>role.server?.id).map(role=>[String(role.server.id),{id:String(role.server.id),name:role.server.name||String(role.server.id)}])).values()];}
+function materialSourceLabel(price){return !price?'暂无报价':price.source==='custom'?'用户定价 · 已固定':price.source==='market'?'今日时价':price.floorAdjusted?'计算所得 · 门槛修正':'计算所得';}
+function materialPricesView(){
+ const record=materialPriceState.record,servers=loggedMaterialServers(),selected=servers.find(server=>server.id===selectedMaterialServer)||servers[0];
+ const entry=(record?.servers||[]).find(row=>String(row.serverId)===selected?.id&&row.day===materialDay()),band=materialFamily==='clock'?[1,2,3,4,5,6,7,8]:materialGradeBand==='1-4'?[1,2,3,4]:materialGradeBand==='11-20'?Array.from({length:materialFamily==='gem'?10:5},(_,i)=>11+i):EquipmentValuation.MARKET_GRADES;
+ const materials=EquipmentValuation.MATERIALS.filter(material=>material.family===materialFamily);
+ return `<section class="panel material-prices-panel"><h2>材料价格</h2><p class="setting-help">宝石、星辉石、五色灵尘 5～10 段是当天时价；钟灵石优先查询 6 级，缺货或触及最低价时补查其他等级，其余按新版合成比例计算。钟灵石仅计当前等级一颗，指定特性全等级计价，其余 4 级起计价。受 10 元最低上架价影响的低段，按最低等级高于 10 元的时价反推并标为计算所得。修改后标为“用户定价”，仅固定该服务器、该宝石、该等级，不再每日更新。</p>${materialPriceState.loading?'<p role="status">正在加载当日材料报价，估价等待完成…</p>':''}${materialPriceState.error?`<p class="error">${esc(materialPriceState.error)}</p>`:''}${(record?.errors||[]).filter(error=>servers.some(server=>server.id===String(error.serverId))).map(error=>`<p class="error">${esc(valuationServerName(error.serverId))}：${esc(error.message)}</p>`).join('')}${servers.length?`<div id="material-server-tabs" class="material-server-tabs" role="tablist" aria-label="材料价格服务器">${servers.map(server=>`<button role="tab" aria-selected="${server.id===selected.id}" data-material-server="${esc(server.id)}">${esc(server.name)}</button>`).join('')}</div><div id="material-price-toolbar" class="material-price-toolbar"><label>材料 <select id="material-family" data-material-family>${[['gem','宝石'],['starlight','星辉石'],['dust','五色灵尘'],['clock','钟灵石']].map(([id,label])=>`<option value="${id}" ${materialFamily===id?'selected':''}>${label}</option>`).join('')}</select></label><div class="material-grade-tabs" aria-label="材料等级">${(materialFamily==='clock'?[]:['1-4','5-10','11-20']).map(id=>`<button data-material-band="${id}" aria-pressed="${materialGradeBand===id}">${id==='11-20'&&materialFamily!=='gem'?'11～15':id.replace('-','～')} 段</button>`).join('')}</div><span>${esc(materialDay())} · 元/颗</span></div><div id="material-table-scroll" class="material-table-scroll"><table class="material-price-table"><thead><tr><th scope="col">材料</th>${band.map(grade=>`<th scope="col">${grade} 段</th>`).join('')}</tr></thead><tbody>${materials.map(material=>`<tr data-run-key="material:${esc(material.id)}"><th scope="row">${esc(material.name)}</th>${band.map(grade=>{if(material.family!=='gem'&&grade>15)return '<td>—</td>';const price=EquipmentValuation.resolveMaterialPrice(material,grade,entry);return `<td><button class="material-price-cell ${price?.source==='custom'?'custom':''}" data-material-edit="${esc(material.id)}" data-material-grade="${grade}" data-material-server-id="${esc(selected.id)}" aria-label="修改${esc(selected.name)}${esc(material.name)}${grade}段价格"><strong>${price?valuationAmount(price.priceCents):'—'}</strong><small>${!price&&entry?.quotes[material.id]?.[grade]?.priceCents<=1000?'门槛价 · 缺少基准':materialSourceLabel(price)}</small>${price?.source==='computed'?`<small>基于 ${price.basisGrade} 段${price.basisSource==='custom'?'用户定价':''}</small>`:''}</button></td>`;}).join('')}</tr>`).join('')}</tbody></table></div>`:'<p class="setting-help">暂无已登录角色，请先添加角色。</p>'}</section>`;
+}
+function materialsView(){return heading('材料价格','')+materialPricesView();}
+function openMaterialPriceEditor(serverId,materialId,grade){
+ const server=loggedMaterialServers().find(row=>row.id===serverId),material=EquipmentValuation.MATERIALS.find(row=>row.id===materialId);if(!server||!material)return;
+ const entry=materialPriceState.record?.servers?.find(row=>String(row.serverId)===serverId),price=EquipmentValuation.resolveMaterialPrice(material,grade,entry);
+ openModal(`<div class="modal-head"><h2 id="dialog-title">${esc(material.name)} · ${grade} 段</h2><button class="icon-button" data-action="close" aria-label="关闭">${icon('close')}</button></div><form id="material-price-form"><input type="hidden" name="serverId" value="${esc(serverId)}"><input type="hidden" name="materialId" value="${esc(materialId)}"><input type="hidden" name="grade" value="${grade}"><p>${esc(server.name)} · ${materialSourceLabel(price)}</p><label class="valuation-field"><span>单颗价格（元）</span><input name="price" type="number" min="0.01" max="1000000000" step="0.01" required value="${price?(price.priceCents/100).toFixed(2):''}"></label><p class="setting-help">保存后固定使用你的价格，不再随每日时价更新。可随时恢复自动定价。</p><p id="material-price-error" class="error" role="alert"></p><div class="modal-actions">${price?.source==='custom'?'<button type="button" class="button secondary" data-material-reset>恢复自动定价</button>':''}<button type="submit" class="button primary">保存用户定价</button></div></form>`);
+}
+async function saveMaterialPrice(fields){
+ if(materialPriceSaving)return;materialPriceSaving=true;
+ try{const response=await fetch('/api/material-prices/custom',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(fields)}),result=await response.json();if(!response.ok)throw Error(result.message||'材料价格保存失败');materialPriceState.record=result;if(typeof invalidateRoleCarriedMaterials==='function')invalidateRoleCarriedMaterials();for(const task of state.tasks.filter(task=>['装备','灵饰','上古玉魄'].includes(task.category)&&task.valuationEnabled))clearEquipmentEstimate(task.id);closeModal();render();toast(fields.reset?'已恢复自动定价，下次估价生效':'已保存用户定价，该等级不再每日更新；下次估价生效');if(fields.reset)void loadMaterialPrices().catch(()=>{});return result;}
+ finally{materialPriceSaving=false;}
+}
+document.addEventListener('click',event=>{const button=event.target.closest('button');if(!button)return;if(button.dataset.materialServer!==undefined){selectedMaterialServer=button.dataset.materialServer;render();}else if(button.dataset.materialBand){materialGradeBand=button.dataset.materialBand;render();}else if(button.dataset.materialEdit){openMaterialPriceEditor(button.dataset.materialServerId,button.dataset.materialEdit,Number(button.dataset.materialGrade));}else if(button.hasAttribute?.('data-material-reset')){const fields=Object.fromEntries(new FormData(document.querySelector('#material-price-form')));void saveMaterialPrice({...fields,reset:true}).catch(error=>{document.querySelector('#material-price-error').textContent=error.message;});}});
+document.addEventListener('change',event=>{if(event.target.dataset.materialFamily!==undefined&&['gem','starlight','dust','clock'].includes(event.target.value)){materialFamily=event.target.value;render();}});
+document.addEventListener('submit',event=>{if(event.target.id!=='material-price-form')return;event.preventDefault();void saveMaterialPrice(Object.fromEntries(new FormData(event.target))).catch(error=>{document.querySelector('#material-price-error').textContent=error.message;});});
+function equipmentValuationRules(task){return task.category==='上古玉魄'?YupoValuation:task.category==='灵饰'?LingshiValuation:EquipmentValuation;}
+function equipmentValuationSkipReason(task,item){return task.category==='装备'?EquipmentValuation.skipReason(item):equipmentValuationRules(task).reason(item);}
+function equipmentValuationEndpoint(task){return task.category==='上古玉魄'?'/api/yupo-valuation':task.category==='灵饰'?'/api/lingshi-valuation':'/api/equipment-valuation';}
+const equipmentEstimateRecords=new Map();
+const equipmentEstimateStorage=(()=>{let opening;async function operation(mode,work){if(typeof indexedDB==='undefined')return null;if(!opening)opening=new Promise((resolve,reject)=>{const r=indexedDB.open('cbg-equipment-valuations',1);r.onupgradeneeded=()=>r.result.createObjectStore('tasks',{keyPath:'taskId'});r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});const db=await opening;return new Promise((resolve,reject)=>{const tx=db.transaction('tasks',mode),r=work(tx.objectStore('tasks'));tx.oncomplete=()=>resolve(r?.result??null);tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error||Error('估价存储失败'));});}return {get:id=>operation('readonly',s=>s.get(id)),put:row=>operation('readwrite',s=>s.put(row)),remove:id=>operation('readwrite',s=>s.delete(id))};})();
+function equipmentEstimateBaseSignature(task){return JSON.stringify([EquipmentValuation.COMPARISON_VERSION,task.resultRevision||'',task.roleId,task.category,task.servers,task.category==='上古玉魄'?[YupoValuation.VERSION,task.yupoFilters]:task.category==='灵饰'?[LingshiValuation.VERSION,task.lingshiFilters]:task.equipmentFilters,task.valuationEnabled===true,valuationSettings]);}
+function equipmentEstimateSignature(task){return JSON.stringify(['buyer-server-gems-live-v16-dual-openings-necklace-up2',equipmentEstimateBaseSignature(task),materialDay(),materialPriceState.record?.revision||0]);}
+function valuationConnectionLost(error){return error?.code==='VALUATION_CONNECTION_LOST'||/network\s?error|failed to fetch|load failed|network request failed|network connection was lost|connection reset|fetch failed|terminated/i.test(String(error?.message||error||''));}
+function valuationConnectionMessage(){return '估价连接已中断，可能是本地服务重启或网络断开。已完成的估价和搜索结果已保留，可继续估价。';}
+async function loadEquipmentEstimates(){if(typeof loadRoleEstimates==='function')await loadRoleEstimates();for(const task of state.tasks.filter(t=>['装备','灵饰','上古玉魄'].includes(t.category)&&t.valuationEnabled)){try{const existing=equipmentEstimateRecords.get(task.id);if(existing?.running||existing?.signature===equipmentEstimateSignature(task))continue;const record=await equipmentEstimateStorage.get(task.id);const current=equipmentEstimateRecords.get(task.id);if(current?.running||current?.signature===equipmentEstimateSignature(task))continue;if(record?.signature===equipmentEstimateSignature(task))equipmentEstimateRecords.set(task.id,{...record,...(valuationConnectionLost(record.error)?{error:valuationConnectionMessage(),resumable:true}:{}),restored:true});}catch(error){toast('估价结果读取失败：'+error.message);}}render();}
+function clearEquipmentEstimate(id){if(typeof clearRoleEstimate==='function')clearRoleEstimate(id);equipmentEstimateRecords.delete(id);void equipmentEstimateStorage.remove(id).catch(error=>toast('旧估价结果清除失败：'+error.message));}
+function equipmentEstimateOptions(task){
+ if(task.category==='角色'&&typeof roleEstimateOptions==='function')return roleEstimateOptions(task);
+ if(!['装备','灵饰','上古玉魄'].includes(task.category))return '';
+ const field=name=>`data-valuation-task="${esc(task.id)}" data-valuation-field="${name}"`,locked=busy.has(task.id);
+ const run=state.taskRuns?.[task.id];
+ return `<div class="equipment-estimate-options"><label class="task-start-option"><span><strong>${esc(task.category)}估价</strong><small>全服采样，取有相近报价或超过 7 天挂牌依据的最低折算价 ×95%；同参数每 3 小时采样一次。</small></span><input type="checkbox" ${field('valuationEnabled')} role="switch" aria-label="${esc(task.category)}估价" ${task.valuationEnabled?'checked':''} ${locked?'disabled':''}></label><p class="valuation-task-status">估价耗时单独计算，下次搜索倒计时从估价结束后开始。${run?.valuationRunning?`<br><strong>估价中 · 已耗时 <span data-valuation-duration="${esc(task.id)}">${RunLogs.duration(Date.now()-run.valuationStartedAt)}</span></strong>`:Number.isFinite(run?.valuationDurationMs)?`<br>上次估价耗时 ${RunLogs.duration(run.valuationDurationMs)}`:''}</p>${locked?'<p class="valuation-task-status">本次搜索及估价结束后可调整开关。</p>':''}</div>`;
+}
+function setTaskValuationOption(id,field,enabled){
+ const task=state.tasks.find(t=>t.id===id);
+ if(!task||!['装备','角色','灵饰','上古玉魄'].includes(task.category)||field!=='valuationEnabled')throw Error('装备估价任务无效');
+ if(busy.has(id))throw Error('请先停止本次搜索，再修改估价开关');
+ const next={...task,valuationEnabled:enabled===true};delete next.fullServerValuation;
+ if((task.valuationEnabled===true)===(next.valuationEnabled===true))return;
+ const tasks=state.tasks.map(t=>t.id===id?next:t);persist(tasks);state.tasks=tasks;clearEquipmentEstimate(id);render();
+ if(task.category==='角色'&&next.valuationEnabled){if(state.taskRuns?.[id])void revalueRoleResults(id);render();if(typeof EquipmentDisclosure==='object')EquipmentDisclosure.refreshRoleViewport?.();}
+ toast(next.valuationEnabled?(task.category==='角色'?'角色估价已开启':'估价设置已保存，下一次搜索生效'):task.category+'估价已关闭');
+}
+document.addEventListener('change',event=>{
+ const input=event.target;
+ if(input.dataset?.valuationTask){try{setTaskValuationOption(input.dataset.valuationTask,input.dataset.valuationField,input.checked);}catch(error){input.checked=state.tasks.find(t=>t.id===input.dataset.valuationTask)?.[input.dataset.valuationField]===true;toast(error.message);render();}return;}
+});
+function valuationAmount(cents){return '¥ '+(Number(cents)/100).toLocaleString('zh-CN',{minimumFractionDigits:2,maximumFractionDigits:2});}
+function valuationServerName(serverId,known=[]){
+ const candidates=[...(typeof serverList==='undefined'?[]:serverList),...known,...(typeof availableRoles==='undefined'?[]:availableRoles.map(role=>role.server))];
+ const names=candidates.filter(Boolean).map(server=>({id:server.serverId??server.id,name:server.serverId!==undefined?server.server:server.name}));
+ return names.find(server=>String(server.id)===String(serverId)&&String(server.name||'').trim())?.name||'未知服务器';
+}
+function equipmentCanRefresh(result){return result?.refreshEligible===true&&typeof result.refreshToken==='string'&&Date.now()<result.nextFullAt;}
+function equipmentValuationRow(taskId,itemId,currentItem){
+ const task=valuationTaskById(taskId),record=equipmentEstimateRecords.get(taskId);if(!task?.valuationEnabled||record?.signature!==equipmentEstimateSignature(task))return null;
+ for(const result of record.results||[]){const row=result.items?.find(row=>row.target.id===itemId);if(row){
+  const latest=currentItem||state.taskRuns?.[taskId]?.items?.find(item=>item.id===itemId),target=latest?{...row.target,...latest,valuationMeta:{...row.target.valuationMeta,...latest.valuationMeta}}:row.target;
+  if(target.kind==='sword'&&EquipmentValuation.skipReason(target)||target.price<50)return {task,result,row:{...row,target,skipped:true,estimateCents:null,sampleEstimateCents:null,marketReferenceCents:null,error:target.kind==='sword'?EquipmentValuation.skipReason(target):'挂牌价低于50元，不估价'}};
+  // Stored estimates and streamed results can outlive a price update or cross
+  // the fifth-day boundary. Always apply the current target cap at display time.
+  const pricing=EquipmentValuation.suggestedPrice(target,row.sampleEstimateCents??row.estimateCents);
+  const latestRow={...row,target,...pricing,calculatedEstimateCents:pricing.estimateCents,marketReferenceCents:row.sampleEstimateCents??null,attributeFocus:EquipmentValuation.attributeFocus(target)};return {task,result,row:typeof withSoldValuation==='function'?withSoldValuation(task,latestRow):latestRow};
+ }}return null;
+}
+function equipmentPremiumQuote(row){
+ // Sort and display use the same final price after the subject's age cap.
+ const estimateCents=row?.estimateCents;
+ return row&&!row.skipped&&Number.isFinite(estimateCents)&&estimateCents>0?{estimateCents,rough:!row.precise&&(row.rough===true||Number.isFinite(row.count)&&row.count<5)}:null;
+}
+function equipmentPremiumLabel(item,row){
+ if(typeof resultSortFor!=='function'||resultSortFor({taskId:item.taskId,items:[item]}).by!=='premium')return '';const quote=equipmentPremiumQuote(row);if(!quote||!Number.isFinite(item.price)||item.price<=0)return '';
+ const rate=Math.round((Math.round(item.price*100)-quote.estimateCents)/quote.estimateCents*1000)/10;
+ return `<span title="（标价 − 最终估价）÷ 最终估价">溢价率 ${rate>0?'+':''}${(rate||0).toFixed(1)}%</span>`;
+}
+function equipmentInlineValuation(item){
+ if(item.kind==='role'&&typeof roleInlineValuation==='function')return roleInlineValuation(item);
+ if(!['sword','lingshi','yupo'].includes(item.kind))return '';const found=equipmentValuationRow(item.taskId,item.id,item),task=valuationTaskById(item.taskId);if(!task?.valuationEnabled)return '';if(item.kind==='sword'&&EquipmentValuation.isRoleExclusive(item))return '<span class="listing-estimate-pending">角色专用装备，不估价</span>';if(item.price<50)return '<span class="listing-estimate-pending">低于50元，不估价</span>';
+ if(!found)return '<span class="listing-estimate-pending">估价待生成</span>';
+ const {row}=found,price=row.estimateCents;if(row.skipped)return `<div class="listing-estimate"><span>${esc(row.error||'不估价')}</span></div>`;
+ return `<div class="listing-estimate" data-change-key="estimate:${esc(item.id)}"><strong class="${price==null?'is-unestimated':row.rough?'is-rough':''}">${price===null||price===undefined?'暂无估价':(row.precise?'精确估价 ':row.cappedByListing?'最终估价 ':row.degraded?'降级估价 ':row.rough?'粗略估价 ':'参考估价 ')+valuationAmount(price)}</strong>${equipmentPremiumLabel(item,row)}${row.rough&&price!=null?'<span class="valuation-rough-warning" title="样本不足或依据有限，参考价可能偏高或偏低，可能把正常价格误判为便宜或偏贵；请核对估价依据">粗略估价可能偏高或偏低，请核对样本</span>':''}${row.belowComparableAsk?'<span>低于同类在售价格</span>':''}${row.supportBasis==='listing-age'?`<span>${row.supportCount?row.supportCount+' 件相近报价 · ':''}挂牌超过 7 天</span>`:''}${row.supportCount>=(row.requiredSupportCount||((row.availableCount??row.count)<5?1:2))?`<span>另有 ${row.supportCount} 件相近报价佐证</span>`:''}${price==null&&row.count?'<span>缺少报价佐证</span>':''}<span>${row.count||0} 件样本${row.count<5?' · 不足 5 件':''}${row.degraded?' · 忽略 '+esc((row.ignoredEffects||[]).map(id=>EquipmentValuation.IMPORTANT_EFFECTS[id]).join('、')):''}</span><button type="button" data-valuation-evidence="${esc(item.id)}" data-valuation-task-id="${esc(item.taskId)}">估价依据</button></div>`;
+}
+function equipmentEstimateView(task){
+ if(task.category==='角色'&&typeof roleEstimateView==='function')return roleEstimateView(task);
+ if(!['装备','灵饰','上古玉魄'].includes(task.category))return '';const record=equipmentEstimateRecords.get(task.id),valid=record?.signature===equipmentEstimateSignature(task);
+ return `<section class="panel equipment-valuation-panel"><div class="valuation-panel-heading"><h2>${esc(task.category)}估价${task.valuationEnabled?'':'未开启'}</h2><button type="button" class="text-button" data-valuation-category="${task.category==='上古玉魄'?'yupo':task.category==='灵饰'?'lingshi':'equipment'}" data-page="valuation-settings">估价设置</button></div>${!task.valuationEnabled?'<p>在任务列表开启估价后，参考价直接显示在商品列表中。</p>':`<p>${valid&&record.running?`正在采样第 ${record.index||1} / ${record.total||1} 组${record.groupName?' · '+esc(record.groupName):''}…${record.stage?'<br>'+esc(record.stage):''}`:'估价与依据显示在每件商品旁。按商品实际附加属性组合和品类容差匹配，取有佐证的最低折算价 ×95%。至少5件有效样本需另外2件佐证，不足5件需另外1件，价差不超过20%；超过7天的挂牌依据仍可使用。'}</p>${valid&&record.running?`<button type="button" class="button secondary" data-action="cancel-search" data-task-id="${esc(task.id)}">停止估价采样</button>`:''}${valid&&record.error?`<p class="error" role="alert">${esc(record.error)}</p>`:''}${valid&&!record.running&&(record.resumable||valuationConnectionLost(record.error))?`<button type="button" class="button secondary" data-valuation-resume="${esc(task.id)}" ${busy.has(task.id)?'disabled':''}>继续估价</button>`:''}${valid?(record.results||[]).filter(equipmentCanRefresh).map(r=>`<p class="valuation-warning">${esc(r.group.name)}${task.category==='上古玉魄'?'':' · '+r.group.level+'级'}：新商品的参数未被缓存充分覆盖，样本不足 5 件。<button type="button" class="button secondary" data-valuation-refresh="${esc(r.group.kindId+':'+r.group.level)}" data-valuation-task-id="${esc(task.id)}" ${busy.has(task.id)?'disabled':''}>更新全服样本</button></p>`).join(''):''}`}</section>`;
+}
+function valuationFormulaNumber(cents){return (Number(cents)/100).toLocaleString('zh-CN',{maximumFractionDigits:2});}
+function valuationEvidenceRole(ref){
+ if(ref.evidenceRole==='aged-anchor')return `定价基准 · ${ref.priceSupportCount||0} 件相近报价 · 挂牌超过 7 天`;
+ return {anchor:'定价基准',support:'价格佐证',isolated:'孤立低价 · 挂牌时长不足或未知，待观察','sparse-anchor':'样本不足 5 件 · 最低折算价基准',comparison:'对照报价'}[ref.evidenceRole]||'';
+}
+function valuationSampleCard(ref,index,task,anchorSupportCount=0){
+ const p=ref.converted,a=ref.sample.adjustments||{},number=valuationFormulaNumber;
+ return `<article class="valuation-evidence-sample"><header><strong>样本 ${index+1}</strong><span>${esc(valuationServerName(ref.sample.serverId,[ref.sample,...(task.servers||[])]))}</span>${ProductActions.render({...ref.sample,taskId:task.id})}</header>${ref.evidenceRole?`<div class="valuation-downgrade-note">${valuationEvidenceRole({...ref,priceSupportCount:ref.priceSupportCount??anchorSupportCount})}</div>`:''}${ref.equivalentSuit?`<div class="valuation-downgrade-note">同组属性套 · ${esc(EquipmentValuation.importantSuits(ref.sample).map(suit=>suit.name).join('、'))}</div>`:''}${ref.ignoredSampleLabels?.length?`<div class="valuation-downgrade-note">样本无效属性不计价：${esc(ref.ignoredSampleLabels.join('、'))}</div>`:''}${ref.ignoredLabels?.length?`<div class="valuation-downgrade-note">未计价词条：${esc(ref.ignoredLabels.join('、'))}</div>`:''}${ref.ignoredEffects?.length?`<div class="valuation-downgrade-note">忽略${esc(ref.ignoredEffects.map(id=>EquipmentValuation.IMPORTANT_EFFECTS[id]).join('、'))}</div>`:''}<div class="valuation-sample-prices"><span>挂牌 ${valuationAmount(Math.round(ref.sample.price*100))}</span><strong>换算 ${valuationAmount(p.totalCents)}</strong></div><div class="valuation-detail-card" data-valuation-sample-index="${index}" data-detail-eid="${esc(ref.sample.detailEid)}"><div class="valuation-detail-skeleton" role="status">正在加载详情…</div></div>${ref.comparison.length?`<table class="valuation-comparison-table" aria-label="本件商品与参考样本属性对照"><thead><tr><th scope="col">属性</th><th scope="col">本件商品</th><th scope="col">参考样本</th></tr></thead><tbody>${ref.comparison.map(r=>`<tr><th scope="row">${esc(r.label)}${r.preferred?'<small>重点</small>':''}</th><td>${esc(r.target)}</td><td>${esc(r.sample)}</td></tr>`).join('')}</tbody></table>`:''}<div class="valuation-sample-formula"><span class="valuation-formula-label">白板</span><span>(${number(Math.round(ref.sample.price*100))} × ${Number(((a.timeFactor||1)*100).toFixed(2))}% − ${number(a.gemCents||0)}${task.category==='上古玉魄'?'':task.category==='灵饰'?' − '+number(a.clockCents||0):' − '+number(a.holeCents||0)})${task.category==='上古玉魄'?'':' ÷ '+Math.round((a.repairFactor||1)*100)+'%'} = ${number(p.baseCents)}</span><span class="valuation-formula-label">换算</span><span>${number(p.baseCents)}${task.category==='上古玉魄'?'':' × '+Math.round(p.repairFactor*100)+'%'}${['灵饰','上古玉魄'].includes(task.category)?'':' + '+number(p.holeCents)} + ${number(p.gem.valueCents)}${task.category==='灵饰'?' + '+number(p.clockCents||0):''} = <b>${number(p.totalCents)}</b>${p.gem.capped?'<small>宝石已封顶</small>':''}</span></div></article>`;
+}
+async function loadValuationSampleCards(modal,task,references){
+ if(!modal||typeof EquipmentDisclosure==='undefined'||typeof EquipmentDisclosure.loadDetail!=='function')return;
+ for(const [index,ref] of references.entries()){
+  if(!modal.isConnected)return;const node=modal.querySelector('[data-valuation-sample-index="'+index+'"]');if(!node)continue;
+  try{const detail=await EquipmentDisclosure.loadDetail({roleId:task.roleId,serverId:ref.sample.serverId,eid:ref.sample.detailEid});if(!modal.isConnected)return;node.innerHTML=EquipmentDisclosure.renderDetail(detail);}
+  catch(error){if(!modal.isConnected)return;node.innerHTML=`<div class="valuation-detail-error" role="alert">${esc(error.message)}<button type="button" data-valuation-detail-retry="${index}">重试详情</button></div>`;if(/验证|MIBAO_AUTH|OTP_AUTH|频繁|登录/.test(error.message)){for(const pending of modal.querySelectorAll('.valuation-detail-skeleton'))pending.textContent='完成验证后可重试详情';return;}}
+ }
+}
+function valuationFocusNote(row){
+ if(row.target?.kind==='yupo')return `<div class="valuation-formula-legend">按灵尘加成前属性比对 · 五色灵尘 ${valuationAmount(row.dustCents||0)} · 自带额外灵尘等级不计材料价</div>`;
+ if(row.target?.kind==='lingshi')return `<div class="valuation-formula-legend">按精炼前属性比对${row.matchTier?' · 样本不足，补充法系组别':''}${row.starCents!=null?' · 星辉石 '+valuationAmount(row.starCents):''}${row.clockStone?' · '+esc(row.clockStone.name)+' '+row.clockStone.grade+'级 '+(row.clockCents?valuationAmount(row.clockCents):'不计价'):''}</div>`;
+ const focus=row.attributeFocus;if(!focus||focus.category==='none'||!EquipmentValuation.actualAdditionKeys(row.target).length)return '';
+ const names={power:'力量',magic:'魔力',dex:'敏捷',physique:'体质',endurance:'耐力'};
+ return `<div class="valuation-formula-legend">${focus.keys.length?'侧重 '+focus.keys.map(key=>names[key]).join('、')+'：样本单项及总和最多低于本件 1 点':'附加属性平级比较'}<br>${esc(focus.reason)}</div>`;
+}
+function valuationSupportedFormula(row){
+ const required=row.requiredSupportCount||((row.availableCount??row.count)<5?1:2);
+ if(row.estimateCents==null)return row.lowestPriceCents!=null?`<p class="valuation-warning">最低折算报价 ${valuationAmount(row.lowestPriceCents)} · 缺少${required}件相近报价佐证，且无超过 7 天的挂牌依据</p>`:'';
+ const formula=row.supportedPriceCents!=null?`${valuationAmount(row.supportedPriceCents)} × 95% = ${valuationAmount(row.sampleEstimateCents)}`:valuationAmount(row.sampleEstimateCents??row.estimateCents);
+ return `<div class="valuation-mean-formula" aria-label="参考价公式">${row.supportedPriceCents!=null?(row.supportBasis==='listing-age'?'最低参考折算价':'有佐证的最低折算价'):'样本估价'} ${formula}</div>${row.supportBasis==='listing-age'?`<p class="valuation-warning">${row.supportCount||0} 件相近报价 · 已挂牌超过 7 天</p>`:''}${row.isolatedLowCents!=null?`<p class="valuation-warning">孤立低价 ${valuationAmount(row.isolatedLowCents)} · 挂牌时长不足或未知，待观察</p>`:''}`;
+}
+function valuationListingFormula(row){
+ if(row.estimateCents==null)return '';
+ if(row.belowComparableAsk)return '<p class="valuation-warning">低于同类在售价格</p>';
+ if(row.priceCapCents==null)return '';
+ const percent=Number((row.targetListing.timeFactor*100).toFixed(2));
+ return `<div class="valuation-mean-formula" aria-label="时长限价公式">建议价 = min(样本估价 ${valuationAmount(row.sampleEstimateCents)}, 本件挂牌 ${valuationAmount(Math.round(row.target.price*100))} × ${percent}%) = <strong>${valuationAmount(row.precise?row.calculatedEstimateCents:row.estimateCents)}</strong></div>`;
+}
+function openEquipmentValuationEvidence(taskId,itemId){
+ const found=equipmentValuationRow(taskId,itemId);if(!found)return;const {task,result,row}=found,references=row.references||[],number=valuationFormulaNumber;
+ const traits=row.traits||{effects:[],skills:[]},names=[...traits.effects.map(id=>EquipmentValuation.IMPORTANT_EFFECTS[id]),...traits.skills.map(id=>EquipmentValuation.IMPORTANT_SKILLS[id]),...EquipmentValuation.importantSuits(row.target).map(suit=>'套装·'+suit.name)];
+ openModal(`<div class="modal-head"><h2 id="dialog-title">${esc(row.target.name)} · 估价依据</h2><button class="icon-button" data-action="close" aria-label="关闭">${icon('close')}</button></div><div class="valuation-evidence-total"><div><span>${row.precise?'精确估价':row.degraded?'降级估价':row.rough?'粗略估价':'参考估价'}</span><strong>${row.estimateCents==null?'暂无估价':valuationAmount(row.estimateCents)}</strong></div><span>${row.count||0} 件样本${row.count<5?' · 不足 5 件':''}</span></div>${typeof soldValuationEvidenceHtml==='function'?soldValuationEvidenceHtml(row,task):''}${valuationFocusNote(row)}${valuationSupportedFormula(row)}${valuationListingFormula(row)}${row.degraded?`<div class="valuation-downgrade-note">无精确样本 · 忽略${esc((row.ignoredEffects||[]).map(id=>EquipmentValuation.IMPORTANT_EFFECTS[id]).join('、'))}</div>`:''}<div class="valuation-evidence-meta"><span>${names.length?esc(names.join(' · ')):''}</span><span>${dateTime(result.sampledAt||result.at)}${result.cached?' · 缓存':''}</span></div>${row.error?`<p class="valuation-warning">${esc(row.error)}</p>`:''}${(result.warnings||[]).map(w=>`<p class="valuation-warning">${esc(w)}</p>`).join('')}${row.refreshEligible&&equipmentCanRefresh(result)?`<button type="button" class="button secondary" data-valuation-refresh="${esc(result.group.kindId+':'+result.group.level)}" data-valuation-task-id="${esc(task.id)}" ${busy.has(task.id)?'disabled':''}>更新全服样本</button>`:''}${Object.entries(row.targetQuotes||{}).length?`<div class="valuation-gem-quotes">${Object.entries(row.targetQuotes).map(([id,q])=>`<span>${esc(EquipmentValuation.GEM_TYPES[id]?.name||id)} ${q.grade}级 · ${valuationAmount(q.priceCents)}/颗 · ${q.source==='custom'?'用户定价':q.source==='computed'?'计算所得':'今日时价'} · ${esc(valuationServerName(q.serverId,[q.source,row.target,...(task.servers||[])]))}</span>`).join('')}</div>`:''}<div class="valuation-formula-legend">${task.category==='上古玉魄'?'白板 = 挂牌 × 样本时间比例 − 样本五色灵尘<br>换算 = 白板 + 本件五色灵尘<br>不计修理失败和开孔。<br>':task.category==='灵饰'?'白板 = (挂牌 × 样本时间比例 − 星辉石 − 钟灵石) ÷ 失败折扣<br>换算 = 白板 × 本件失败折扣 + 本件星辉石 + 本件钟灵石<br>钟灵石仅计当前等级一颗，不累加低等级。<br>':'白板 = (挂牌 × 样本时间比例 − 宝石 − 开孔) ÷ 失败折扣<br>换算 = 白板 × 本件失败折扣 + 本件开孔 + 本件宝石<br>'}前 5 天不折价；第 6 天起按二次曲线加速折价，临近下架降至 80%；时间缺失不应用本件价格上限</div><div class="valuation-evidence-grid">${references.map((ref,index)=>valuationSampleCard(ref,index,task,row.supportCount)).join('')}</div>`,'valuation-evidence-modal');
+ const modal=document.querySelector('.valuation-evidence-modal');if(modal){modal.valuationEvidence={task,references};void loadValuationSampleCards(modal,task,references);}
+}
+document.addEventListener('click',event=>{
+ const button=event.target.closest('button');if(!button)return;
+ if(button.dataset.valuationDetailRetry!==undefined){const modal=button.closest('.valuation-evidence-modal'),data=modal?.valuationEvidence;if(data)void loadValuationSampleCards(modal,data.task,data.references);return;}
+ if(button.dataset.valuationEvidence!==undefined){event.preventDefault();event.stopPropagation();openEquipmentValuationEvidence(button.dataset.valuationTaskId,button.dataset.valuationEvidence);}
+ if(button.dataset.valuationResume){event.preventDefault();event.stopPropagation();void resumeEquipmentValuation(button.dataset.valuationResume);return;}
+ if(button.dataset.valuationRefresh){event.preventDefault();event.stopPropagation();void refreshEquipmentValuation(button.dataset.valuationTaskId,button.dataset.valuationRefresh);}
+});
+async function refreshEquipmentValuation(taskId,groupKey){
+ if(typeof linkValuationState==='object'&&linkValuationState.task?.id===taskId){const r=equipmentEstimateRecords.get(taskId)?.results?.find(r=>r.group.kindId+':'+r.group.level===groupKey);if(!linkValuationState.running&&equipmentCanRefresh(r)){closeModal();await estimateListingLink({url:linkValuationState.url,roleId:linkValuationState.task.roleId},{refreshToken:r.refreshToken});}else toast('当前无需更新全服样本');return;}
+ const task=state.tasks.find(t=>t.id===taskId),record=equipmentEstimateRecords.get(taskId),result=record?.results.find(r=>r.group.kindId+':'+r.group.level===groupKey);
+ if(!task||!record||busy.has(taskId)||record.signature!==equipmentEstimateSignature(task)||!equipmentCanRefresh(result)){toast('当前无需更新全服样本');return;}
+ const run=state.taskRuns[taskId];if(!run){toast('请先执行一次普通搜索');return;}
+ const controller=new AbortController();busy.add(taskId);searchControllers.set(taskId,controller);closeModal();
+ try{await runEquipmentValuation(task,run,controller.signal,{refreshGroup:groupKey,refreshToken:result.refreshToken});}finally{busy.delete(taskId);if(searchControllers.get(taskId)===controller)searchControllers.delete(taskId);render();}
+}
+async function resumeEquipmentValuation(taskId){
+ const task=state.tasks.find(t=>t.id===taskId),record=equipmentEstimateRecords.get(taskId),run=state.taskRuns?.[taskId];
+ if(!task||!run||busy.has(taskId)||record?.running||record?.signature!==equipmentEstimateSignature(task)||!(record.resumable||valuationConnectionLost(record.error))){toast('当前无需继续估价');return;}
+ const controller=new AbortController();busy.add(taskId);searchControllers.set(taskId,controller);
+ try{await runEquipmentValuation(task,run,controller.signal,{resume:true});}finally{busy.delete(taskId);if(searchControllers.get(taskId)===controller)searchControllers.delete(taskId);render();}
+}
+function assertEquipmentValuationVersion(result){if(result?.version!==undefined&&result.version!==EquipmentValuation.COMPARISON_VERSION)throw Object.assign(Error('估价规则已更新，请重启应用或本地服务后再估价。'),{code:'VALUATION_RULES_OUTDATED'});}
+async function readEquipmentValuationResponse(response,onProgress,signal){
+ if(!response.ok||!response.body?.getReader||!response.headers?.get('content-type')?.includes('application/x-ndjson')){const result=await response.json();if(response.ok)assertEquipmentValuationVersion(result);return result;}
+ const reader=response.body.getReader(),decoder=new TextDecoder();let buffer='',result;
+ function line(source){if(!source.trim())return;const event=JSON.parse(source);if(event.type==='progress'){assertEquipmentValuationVersion(event.result);onProgress(event.result);}else if(event.type==='result'){assertEquipmentValuationVersion(event.result);result=event.result;}else if(event.type==='error')throw Object.assign(Error(event.message||'估价未完成'),{logs:event.logs});}
+ try{for(;;){signal.throwIfAborted();const chunk=await reader.read();buffer+=decoder.decode(chunk.value,{stream:!chunk.done});let end;while((end=buffer.indexOf('\n'))>=0){line(buffer.slice(0,end));buffer=buffer.slice(end+1);}if(chunk.done)break;}line(buffer);if(!result)throw Object.assign(Error(valuationConnectionMessage()),{code:'VALUATION_CONNECTION_LOST'});return result;}catch(error){try{await reader.cancel?.();}catch{}throw error;}finally{reader.releaseLock();}
+}
+async function runEquipmentValuation(task,run,signal,{refreshGroup,refreshToken,resume=false}={}){
+ if(task.category==='角色'&&typeof runRoleValuation==='function')return runRoleValuation(task,run,signal);
+ if(!['装备','灵饰','上古玉魄'].includes(task.category)||!task.valuationEnabled)return;
+ let signature=equipmentEstimateSignature(task);const baseSignature=equipmentEstimateBaseSignature(task),record={taskId:task.id,signature,at:Date.now(),running:true,results:refreshGroup||resume?[...(equipmentEstimateRecords.get(task.id)?.results||[])]:[],error:'',total:0,index:0};equipmentEstimateRecords.set(task.id,record);run.valuationRunning=true;run.valuationStartedAt=record.at;render();
+ const active=()=>!run.retired&&equipmentEstimateRecords.get(task.id)===record&&state.tasks.some(t=>t.id===task.id&&equipmentEstimateSignature(t)===signature);
+ try{
+  await loadMaterialPrices();signal.throwIfAborted();if(equipmentEstimateRecords.get(task.id)!==record||!state.tasks.some(t=>t.id===task.id&&equipmentEstimateBaseSignature(t)===baseSignature))return;signature=equipmentEstimateSignature(task);record.signature=signature;if(!active())return;
+  if(valuationSettingsError)throw Error('请先修复全局装备估价设置：'+valuationSettingsError);
+  const groups=equipmentValuationRules(task).groups(task,run.currentItems||run.items||[]);if(!groups.length)throw Error('没有可估价的装备分组，请限定装备类型和等级');const batches=groups.map(group=>({group,rows:(run.currentItems||run.items||[]).filter(item=>String(item.equipmentKindId)===String(group.kindId)&&Number(item.level)===group.level)})).filter(batch=>batch.rows.length&&(!refreshGroup||batch.group.kindId+':'+batch.group.level===refreshGroup));if(!batches.length)throw Error('本次搜索没有可估价的装备商品');record.total=batches.length;
+  for(const [index,{group,rows}] of batches.entries()){
+   signal.throwIfAborted();if(!active())return;record.index=index+1;record.groupName=(group.level?group.level+'级 ':'')+group.name;record.stage='';render();
+   const seedRows=rows.map(item=>Object.fromEntries(['id','detailEid','orderSn','collected','serverId','server','area','name','type','kind','equipmentKindId','level','price','priceDisplay','icon','valuationMeta','attributes','added','specialSkills','specialEffects','suits','description','lingshiMeta','yupoMeta'].filter(k=>item[k]!==undefined).map(k=>[k,item[k]])));
+   const response=await fetch(equipmentValuationEndpoint(task),{method:'POST',headers:{'Content-Type':'application/json',Accept:'application/x-ndjson'},body:JSON.stringify({task,group,seedRows,settings:valuationSettings,...(refreshToken?{refreshToken}:{})}),signal});
+   const result=await readEquipmentValuationResponse(response,partial=>{if(!active())return;if(partial.stage)record.stage=partial.stage;if(partial.progress)record.progress=partial.progress;const previous=record.results.find(r=>r.group.kindId===group.kindId&&r.group.level===group.level),items=new Map((previous?.items||[]).map(row=>[row.target.id,row]));for(const row of partial.items||[])items.set(row.target.id,row);record.results=record.results.filter(r=>r!==previous);record.results.push({...partial,items:[...items.values()]});renderBackground();},signal);if(!active())return;
+   for(const log of result.logs||[])state.requestLogs.unshift({type:'request',runId:run.runId,taskId:task.id,roleId:task.roleId,name:task.name,at:log.at,url:log.url,message:'估价 · '+log.message});state.requestLogs=state.requestLogs.slice(0,500);
+   if(!response.ok)throw Error(result.message||'装备估价未完成');record.results=record.results.filter(r=>r.group.kindId!==group.kindId||r.group.level!==group.level);record.results.push(result);render();
+  }
+ }catch(error){if(active()){record.resumable=!signal.aborted&&valuationConnectionLost(error);record.error=signal.aborted?'估价已停止，正常搜索结果已保留':record.resumable?valuationConnectionMessage():error.message;if(record.resumable){state.requestLogs.unshift({type:'request',runId:run.runId,taskId:task.id,roleId:task.roleId,name:task.name,at:Date.now(),message:'估价连接中断：'+error.message});state.requestLogs=state.requestLogs.slice(0,500);}if(/验证码|MIBAO_AUTH|OTP_AUTH/.test(error.message)){for(const peer of state.tasks.filter(t=>t.roleId===task.roleId)){peer.lastError=error.message;peer.nextRunAt=null;}void loadRoles();}}}
+ finally{record.finishedAt=Date.now();record.durationMs=record.finishedAt-record.at;run.valuationDurationMs=record.durationMs;run.valuationRunning=false;record.running=false;if(active()){try{await equipmentEstimateStorage.put({...record,running:false});}catch(error){record.error+=' 估价结果未能保存：'+error.message;}toast(`${signal.aborted?'估价已停止':record.error?'估价结束':'估价完成'}，耗时 ${RunLogs.duration(record.durationMs)}${task.enabled?'；下次搜索倒计时从现在开始。':'。'}`);render();}}
+}

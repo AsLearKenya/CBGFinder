@@ -1,0 +1,2 @@
+(function(root,factory){const data=factory();if(typeof module==='object'&&module.exports)module.exports=data;else root.RoleValuationCosts=data;})(globalThis,function(){return {"school": {"170": 84425238, "160": 35393892, "155": 13123917, "180": 174276702, "175": 121733028, "165": 58799868, "150": 0}, "life": {"130": 9769765, "150": 19323010, "120": 6683600, "140": 13901235, "160": 26315625, "155": 22603975, "135": 11690330, "145": 16434160, "125": 8110010}};});
+// Source: https://xyq.163.com/tools/index.html (public resource APIs), verified 2026-10-30.

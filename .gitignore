@@ -1,0 +1,13 @@
+node_modules/
+release/
+.data/
+work/
+coverage/
+.DS_Store
+*.log
+.env
+.env.*
+*.enc
+*.test.cjs
+*-fixture.json
+qa-*
