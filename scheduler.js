@@ -10,7 +10,7 @@
   function allocationError(task){return SearchParams.roleTaskError(getTasks(),task);}
   function reset(task){task.nextRunAt=task.enabled&&supported(task)&&!isBlocked(task)&&!allocationError(task)&&!activeIds.has(task.id)?now()+duration(task):null;}
   function setEnabled(task,enabled,{immediate=false}={}){
-   const error=enabled&&allocationError(task);if(error){task.enabled=false;task.nextRunAt=null;onError(Error(error));onChange();return false;}
+   const error=enabled&&(allocationError(task)||SearchParams.roleEnabledTaskError(getTasks(),{...task,enabled:true}));if(error){task.enabled=false;task.nextRunAt=null;onError(Error(error));onChange();return false;}
    task.enabled=Boolean(enabled&&supported(task));reset(task);if(task.enabled&&immediate&&!isBlocked(task)&&!activeIds.has(task.id))task.nextRunAt=now();onChange();
   }
   async function run(id,source='manual',options={}){

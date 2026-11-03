@@ -37,7 +37,7 @@
   if(!Array.isArray(tasks))throw new Error('任务存档格式无效，原存档未被修改');
   const result=tasks.map(project);
   if(new Set(result.map(task=>task.id)).size!==result.length)throw new Error('任务编号重复，原存档未被修改');
-  for(const task of result){const error=SearchParams.roleTaskError(result,task);if(error){task.enabled=false;task.lastError=error;}}
+  const enabledCounts=new Map();for(const task of result){let error=SearchParams.roleTaskError(result,task);if(!error&&task.enabled&&task.roleId){const count=enabledCounts.get(task.roleId)||0;if(count>=SearchParams.policy.roleEnabledTaskLimit)error=`同一角色最多开启${SearchParams.policy.roleEnabledTaskLimit}个任务，已保留任务并暂停`;else enabledCounts.set(task.roleId,count+1);}if(error){task.enabled=false;task.lastError=error;}}
   return result;
  }
  function load(storage,now=Date.now()){
