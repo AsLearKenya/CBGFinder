@@ -4,7 +4,7 @@
  function comparisons(target,sample,task){
   if(!target||!sample||target.id===sample.id||target.kind!==sample.kind||(target.kind!=='sword'&&String(target.equipmentKindId)!==String(sample.equipmentKindId))||(target.kind!=='lingshi'&&Number(target.level)!==Number(sample.level)))return null;
   if(target.kind==='sword'){if(B.skipReason(target)||B.isRoleExclusive(sample))return null;const rules=B.comparisonRules(task.equipmentFilters||{},{kindId:target.equipmentKindId,level:Number(target.level)},[target]);if(!rules.length||!rules.every(r=>Number.isFinite(B.ruleValue(target,r)))||!B.similar(target,sample,rules))return null;return B.comparisons(target,sample,rules);}
-  const engine=target.kind==='lingshi'?L:target.kind==='yupo'?Y:null;if(!engine||engine.reason(target))return null;for(const p of engine.plans(target)){const rows=engine.match(target,sample,p);if(rows)return rows;}return null;
+  const engine=target.kind==='lingshi'?L:target.kind==='yupo'?Y:target.kind==='pet-equipment'?(typeof module==='object'&&module.exports?require('./pet-equipment-valuation.js'):globalThis.PetEquipmentValuation):null;if(!engine||engine.reason(target))return null;for(const p of engine.plans(target)){const rows=engine.match(target,sample,p);if(rows)return rows;}return null;
  }
  function apply(row,task,history=[]){
   if(row?.precise)row={...row,estimateCents:row.calculatedEstimateCents,rough:row.calculatedRough,precise:false,soldEvidence:[],soldReferenceCents:null,soldMatchCount:0};

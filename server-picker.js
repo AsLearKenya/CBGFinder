@@ -94,14 +94,18 @@ function updateServerCounts(){
   group.querySelector('[data-region-dot]').hidden=count===0;
  }
 }
+function selectServerHistory(index){
+ if(!serverPageOpen)return;
+ const record=serverHistory()[index];if(!record)return;
+ const keys=serverList.filter(s=>record.keys.includes(s.key)).map(s=>s.key);if(!keys.length)return;
+ pendingServerKeys=new Set(serverPickerContext.multiple?keys:keys.slice(0,1));
+ ServerPicker.close(true);
+}
 document.addEventListener('keydown',event=>{if(serverPageOpen&&serverPickerContext.presentation==='dropdown'&&event.key==='Enter'&&event.target.matches?.('input')){event.preventDefault();return;}if(serverPageOpen&&event.key==='Escape'){event.preventDefault();event.stopImmediatePropagation();ServerPicker.close(false);}});
 document.addEventListener('click',async event=>{
  const button=event.target.closest('button');if(!button)return;
  if(button.dataset.serverHistory!==undefined&&serverPageOpen){
-  const record=serverHistory()[Number(button.dataset.serverHistory)];if(!record)return;
-  const keys=serverList.filter(s=>record.keys.includes(s.key)).map(s=>s.key);
-  pendingServerKeys=new Set(serverPickerContext.multiple?keys:keys.slice(0,1));serverQuery='';
-  const search=document.querySelector('#server-search');if(search)search.value='';renderServerPicker();
+  selectServerHistory(Number(button.dataset.serverHistory));
  }
  else if(button.dataset.serverInitial){const group=[...document.querySelectorAll('.server-group')].find(group=>group.dataset.initial===button.dataset.serverInitial);if(group){group.scrollIntoView({block:'start',behavior:'auto'});group.querySelector('summary')?.focus({preventScroll:true});}}
  else if(button.dataset.action==='confirm-servers')ServerPicker.close(true);

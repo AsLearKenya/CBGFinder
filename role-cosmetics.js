@@ -16,7 +16,7 @@
  const HUNDRED_CLOTHES=['霞姿月韵','云龙梦','瑰梦潋·渔','绯雪织','鹿角弯弯·咩咩','碧华锦','落星织','羽仙歌','雪眸影','铃儿叮当','葫芦娃','星河乐章','喵绒绒','花间梦','花重云','夜之幽兰','夜之孤煞','女儿情','龙卷风','衔龙环','灼灼韶华','喜羊羊','巫山曲','幽蔷盛宴','旃檀香','青蛇醉','许仙','白娘子','驯龙高手','水云归'];
  const HUNDRED_MOUNTS=['幻·帝江','晓·白泽','幽·白泽','独角马','八部天龙马'];
  const hundredPrices=()=>Object.fromEntries([...HUNDRED_CLOTHES.map(n=>[key('clothes',n),price(100)]),...HUNDRED_MOUNTS.map(n=>[key('mounts',n),price(100)])]);
- function defaults(){return {defaultsRevision:2,defaultPrice:50,weaponDefaultPrice:50,mountDefaultPrice:50,dyePrice:100,prices:{
+ function defaults(){return {defaultsRevision:2,defaultPrice:50,weaponDefaultPrice:50,mountDefaultPrice:50,widgetDefaultPrice:200,effectDefaultPrice:500,dyePrice:100,prices:{
   ...hundredPrices(),
   [key('clothes','青花瓷')]:price(67000,15000),[key('mounts','天使猪猪')]:price(14000,17000),[key('mounts','九尾冰狐')]:price(7000,9000),[key('mounts','黑猪')]:price(1000),
   [key('clothes','冰雪玉兔')]:price(1900,2900),[key('clothes','如意金箍棒')]:price(2000),[key('clothes','如意金箍棒·月白')]:price(300),[key('clothes','如意金箍棒·墨黑')]:price(300),
@@ -39,20 +39,21 @@
   if(!validMoney(input.defaultPrice)||!validMoney(input.dyePrice))throw Error('外观默认价格无效');
   const migrate=input.defaultsRevision!==2;
   const legacyDefault=migrate&&Number(input.defaultPrice)===100?50:Number(input.defaultPrice);
-  const weaponDefaultPrice=input.weaponDefaultPrice??legacyDefault,mountDefaultPrice=input.mountDefaultPrice??legacyDefault;
+  const weaponDefaultPrice=input.weaponDefaultPrice??legacyDefault,mountDefaultPrice=input.mountDefaultPrice??legacyDefault,widgetDefaultPrice=input.widgetDefaultPrice??200,effectDefaultPrice=input.effectDefaultPrice??500;
+  if(!validMoney(widgetDefaultPrice)||!validMoney(effectDefaultPrice))throw Error('挂件／特效默认价格无效');
   if(!validMoney(weaponDefaultPrice)||!validMoney(mountDefaultPrice))throw Error('武器锦衣／祥瑞默认价格无效');
   const prices=migrate?hundredPrices():{};for(const [k,p] of Object.entries(input.prices||{})){if(!validKey(k)||!validMoney(p?.male)||!validMoney(p?.female))throw Error('外观单件价格无效');for(const expanded of priceKeys(k)){if(expanded!==k&&Object.prototype.hasOwnProperty.call(input.prices,expanded))continue;prices[expanded]={male:Number(p.male),female:Number(p.female)};}}
   if(!Array.isArray(input.combos)||input.combos.length>100)throw Error('组合设置无效（最多100组）');
   const ids=new Set(),combos=input.combos.map(c=>{
    const members=[...new Set(c.members||[])];if(!/^[a-zA-Z0-9_-]{1,80}$/.test(c.id)||ids.has(c.id)||typeof c.name!=='string'||!c.name.trim()||c.name.length>80||members.length<2||members.length>30||members.some(k=>!validKey(k))||!validMoney(c.male)||!validMoney(c.female))throw Error('组合需有名称、至少两件不同外观及有效价格');ids.add(c.id);return {id:c.id,name:c.name.trim(),members,male:Number(c.male),female:Number(c.female)};
-  });return {defaultsRevision:2,defaultPrice:legacyDefault,weaponDefaultPrice:Number(weaponDefaultPrice),mountDefaultPrice:Number(mountDefaultPrice),dyePrice:Number(input.dyePrice),prices,combos};
+  });return {defaultsRevision:2,defaultPrice:legacyDefault,weaponDefaultPrice:Number(weaponDefaultPrice),mountDefaultPrice:Number(mountDefaultPrice),widgetDefaultPrice:Number(widgetDefaultPrice),effectDefaultPrice:Number(effectDefaultPrice),dyePrice:Number(input.dyePrice),prices,combos};
  }
  const optionNames={clothes:(Catalog.clothesOptions||[]).map(r=>r[1]),mounts:Catalog.mountOptions||[],widgets:(Catalog.widgetOptions||[]).map(r=>r[1]),effects:Catalog.effectOptions||[]};
  function isWeaponClothes(name,items=[]){
   const parts=items.map(garmentPart).filter(p=>p!==null);if(parts.length)return parts.includes('5');
   const f=family('clothes',name);return (Catalog.clothesOptions||[]).some(([id,n])=>family('clothes',n)===f&&((Number(id)>=14400&&Number(id)<15000)||(Number(id)>=92000&&Number(id)<93000)));
  }
- function defaultPriceFor(kind,name,cfg,items=[]){if(isFree(kind,name))return 0;if(kind==='mounts')return Number(cfg.mountDefaultPrice??cfg.defaultPrice);if(kind==='clothes')return Number(isWeaponClothes(name,items)?cfg.weaponDefaultPrice??cfg.defaultPrice:cfg.defaultPrice);return 0;}
+ function defaultPriceFor(kind,name,cfg,items=[]){if(kind==='widgets')return Number(cfg.widgetDefaultPrice??200);if(kind==='effects')return Number(cfg.effectDefaultPrice??500);if(isFree(kind,name))return 0;if(kind==='mounts')return Number(cfg.mountDefaultPrice??cfg.defaultPrice);if(kind==='clothes')return Number(isWeaponClothes(name,items)?cfg.weaponDefaultPrice??cfg.defaultPrice:cfg.defaultPrice);return 0;}
  function options(kind){return [...new Set((optionNames[kind]||[]).flatMap(n=>priceNames(kind,n)))].map(name=>({key:key(kind,name),name,kind}));}
  const knownNames=Object.fromEntries(Object.keys(KINDS).map(k=>[k,new Set(options(k).map(o=>o.name))]));
  const aliases={mounts:{'炽·麒麟':'麒麟','炫·麒麟':'麒麟','晓·白泽':'白泽','幽·白泽':'白泽','鲲之大':'鲲',...Object.fromEntries(['金翅','玄宿','绯羽','岚冥','琼翎','紫霆','鎏月','青梧','九霄'].map(n=>[n+'凤凰','凤凰']))}};
@@ -132,7 +133,7 @@
     }
    }else{
     const configured=[...new Set([...names,g.family])].map(name=>({name,p:cfg.prices[key(g.kind,name)]})).filter(x=>x.p),has=configured.length>0,best=has?configured.map(x=>({name:x.name,value:sexPrice(x.p)})).sort((a,b)=>b.value-a.value)[0]:{name:g.family,value:defaultPriceFor(g.kind,g.family,cfg,g.items)};
-    ownRows.push({kind:g.kind,name:best.name,owned:names.join('、'),rule:has?'单独设置价格；染色／多形态取最高一次':isFree(g.kind,g.family)?'官方免费赠送，不计默认限量价':g.kind==='mounts'?'统一限量价；染色／多形态计一次':'未设置价格，不计入估价',amountCents:Math.round(best.value*100),status:has||g.kind==='mounts'?'included':'unpriced'});
+    ownRows.push({kind:g.kind,name:best.name,owned:names.join('、'),rule:has?'单独设置价格；染色／多形态取最高一次':isFree(g.kind,g.family)?'官方免费赠送，不计默认限量价':g.kind==='mounts'?'统一限量价；染色／多形态计一次':'默认'+KINDS[g.kind]+'单价；同款计一次',amountCents:Math.round(best.value*100),status:'included'});
    }
    standalone.set(g.id,ownRows);singlePrices.set(g.id,ownRows.reduce((sum,r)=>sum+r.amountCents,0));
   }

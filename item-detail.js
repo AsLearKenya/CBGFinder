@@ -64,11 +64,17 @@ function parseDetail(html){
   if(!count)sections.push({title:'召唤兽装备',lines:['未携带装备']});
  }
  const equipBlock=html.match(/\bvar\s+equip\s*=\s*\{([\s\S]*?)\n\};/)?.[1]||'';
- function field(key){const m=equipBlock.match(new RegExp('"'+key+'"\\s*:\\s*("(?:[^"\\\\]|\\\\.)*"|\\x27[^\\x27]*\\x27|[0-9]+|true|false)'));if(!m)return '';return m[1].startsWith('"')?JSON.parse(m[1]):m[1].replace(/^'|'$/g,'');}
+ function readField(block,key){const m=block.match(new RegExp('"'+key+'"\\s*:\\s*("(?:[^"\\\\]|\\\\.)*"|\\x27[^\\x27]*\\x27|[0-9]+|true|false)'));if(!m)return '';return m[1].startsWith('"')?JSON.parse(m[1]):m[1].replace(/^'|'$/g,'');}
+ const field=key=>readField(equipBlock,key);
  const loreMatch=!pet&&html.match(/\bvar\s+client_equip_desc\s*=\s*("(?:[^"\\]|\\.)*")\s*;/);
  let lore='';if(loreMatch){try{lore=JSON.parse(loreMatch[1]);}catch{}}
  const listing={};
  for(const key of ['is_split_main_role','is_split_independent_role','kindid','equip_type','server_name','area_name','game_ordersn','order_sn','expire_time','onsale_expire_time_desc','cross_server_poundage','cross_server_poundage_discount','gem_level','jinglian_level','repair_fail','hole_num','all_damage','init_damage','init_damage_raw','shanghai','mingzhong','init_wakan','all_wakan','init_defense','init_hp','init_dex','gem_value','special_skill','special_effect','suit_effect']){const value=field(key);if(value!=='')listing[key]=value;}
+ // EquipInfo describes the advertised item; ServerInfo/login cookies describe the viewer.
+ const advertised=html.match(/\bvar\s+EquipInfo\s*=\s*\{([\s\S]*?)\n\};/)?.[1]||'',advertisedEid=readField(advertised,'eid'),advertisedServer=readField(advertised,'server_id');
+ if(advertisedEid&&advertisedEid===field('eid')&&String(advertisedServer)===String(field('server_id')||field('serverid'))){
+  for(const key of ['server_name','area_name']){const value=readField(advertised,key);if(value)listing[key]=value;}
+ }
  if(!listing.game_ordersn&&listing.order_sn)listing.game_ordersn=listing.order_sn;
  if(!listing.equip_type&&!roleInfo&&!pet){const name=field('equip_name'),entry=Object.entries(require('./role-detail-config.js').equip_info).find(([,value])=>value.name===name);if(entry)listing.equip_type=entry[0];}
  if(roleInfo){

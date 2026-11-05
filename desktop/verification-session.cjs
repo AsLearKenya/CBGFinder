@@ -31,7 +31,7 @@ function createVerificationWindows({BrowserWindow,session,roles,server,officialC
  const flows=new Map();
  async function finish(flow){
   if(flow.finishing)return flow.finishing;
-  flow.finishing=(async()=>{try{await roles.importBrowserSession(flow.roleId,{version:flow.version,cookies:savedCookies(await flow.session.cookies.get({}))});if(flow.shared)officialClient.adoptVersion(flow.roleId,(await roles.get(flow.roleId)).cookieVersion||0);return {ok:true};}catch(error){if(flow.shared)officialClient.invalidate(flow.roleId);throw error;}finally{flows.delete(flow.roleId);server.endBrowserVerification(flow.roleId);if(flow.shared){flow.window.removeListener('close',flow.onClose);if(!flow.window.isDestroyed())flow.window.hide();}else{if(!flow.window.isDestroyed())flow.window.destroy();await flow.session.clearStorageData().catch(()=>{});}}})();return flow.finishing;
+  flow.finishing=(async()=>{try{await roles.importBrowserSession(flow.roleId,{version:flow.version,cookies:savedCookies(await flow.session.cookies.get({}))});if(flow.shared)officialClient.adoptVersion(flow.roleId,(await roles.get(flow.roleId)).cookieVersion||0);return {ok:true};}catch(error){if(flow.shared)officialClient.invalidate(flow.roleId);throw error;}finally{flows.delete(flow.roleId);server.endBrowserVerification(flow.roleId);if(flow.shared){officialClient.setInteractive?.(flow.roleId,false);flow.window.removeListener('close',flow.onClose);if(!flow.window.isDestroyed())flow.window.hide();}else{if(!flow.window.isDestroyed())flow.window.destroy();await flow.session.clearStorageData().catch(()=>{});}}})();return flow.finishing;
  }
  async function open(input){
   const roleId=input?.roleId;if(typeof roleId!=='string'||!roleId)throw Error('请选择角色');
@@ -39,7 +39,7 @@ function createVerificationWindows({BrowserWindow,session,roles,server,officialC
   const snapshot=await server.beginBrowserVerification(roleId);
   let browserSession,child,flow;
   try{
-   if(officialClient){const worker=await officialClient.acquire(roleId);browserSession=worker.session;child=worker.window;}
+   if(officialClient){const worker=await officialClient.acquire(roleId);browserSession=worker.session;child=worker.window;officialClient.setInteractive?.(roleId,true);}
    else{
     browserSession=session.fromPartition('cbg-verification-'+crypto.randomUUID());
     browserSession.setUserAgent(userAgent);
@@ -59,10 +59,10 @@ function createVerificationWindows({BrowserWindow,session,roles,server,officialC
    if(!officialClient)child.once('ready-to-show',()=>child.show());
    flow.page=await loadVerificationPage(flow,{entry:flow.kind});
    child.show();child.focus();return {opened:true,page:flow.page};
-  }catch(error){if(flow){flows.delete(roleId);if(flow.shared){child.removeListener('close',flow.onClose);if(!child.isDestroyed())child.hide();}else if(!child.isDestroyed())child.destroy();}server.endBrowserVerification(roleId);if(!officialClient)await browserSession?.clearStorageData().catch(()=>{});throw Error('官方验证窗口无法加载，请检查网络后重试');}
+  }catch(error){officialClient?.setInteractive?.(roleId,false);if(flow){flows.delete(roleId);if(flow.shared){officialClient.setInteractive?.(roleId,false);child.removeListener('close',flow.onClose);if(!child.isDestroyed())child.hide();}else if(!child.isDestroyed())child.destroy();}server.endBrowserVerification(roleId);if(!officialClient)await browserSession?.clearStorageData().catch(()=>{});throw Error('官方验证窗口无法加载，请检查网络后重试');}
  }
  async function finishRole({roleId}={}){const flow=flows.get(roleId);if(!flow)throw Error('验证窗口已关闭，请点击“尝试请求”确认状态');return finish(flow);}
- function dispose(){for(const flow of flows.values()){server.endBrowserVerification(flow.roleId);if(flow.shared){flow.window.removeListener('close',flow.onClose);if(!flow.window.isDestroyed())flow.window.hide();}else{flow.window.destroy();void flow.session.clearStorageData().catch(()=>{});}}flows.clear();}
+ function dispose(){for(const flow of flows.values()){server.endBrowserVerification(flow.roleId);if(flow.shared){officialClient.setInteractive?.(flow.roleId,false);flow.window.removeListener('close',flow.onClose);if(!flow.window.isDestroyed())flow.window.hide();}else{flow.window.destroy();void flow.session.clearStorageData().catch(()=>{});}}flows.clear();}
  return {flows,open,finish:finishRole,dispose};
 }
 function install({ipcMain,win,origin,...options}){

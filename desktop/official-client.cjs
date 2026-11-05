@@ -42,7 +42,7 @@ function requestScript(url,options,id){
   }finally{window.__cbgOfficialRequests.delete(input.id);}
  })(${JSON.stringify(input)})`;
 }
-function createOfficialClient({BrowserWindow,session,roles,delay=wait,now=Date.now}){
+function createOfficialClient({BrowserWindow,session,roles,delay=wait,now=Date.now,pageLoadTimeoutMs=30000}){
  const workers=new Map();let disposed=false;
  function workerFor(roleId){
   if(disposed)throw Error('官方请求通道已关闭');
@@ -53,15 +53,33 @@ function createOfficialClient({BrowserWindow,session,roles,delay=wait,now=Date.n
    browserSession.setPermissionRequestHandler((_w,_p,done)=>done(false));browserSession.on('will-download',event=>event.preventDefault());
    const window=new BrowserWindow({title:'官方安全验证 · 当前角色会话',width:1000,height:800,minWidth:520,minHeight:600,show:false,webPreferences:{session:browserSession,nodeIntegration:false,contextIsolation:true,sandbox:true,webSecurity:true,backgroundThrottling:false}});
    const guard=(event,url)=>{if(!allowedUrl(url))event.preventDefault();};window.webContents.on('will-navigate',guard);window.webContents.on('will-redirect',guard);
-   window.webContents.setWindowOpenHandler(({url})=>{if(allowedUrl(url))void window.loadURL(url).catch(()=>{});return {action:'deny'};});
+   window.webContents.setWindowOpenHandler(({url})=>{if(workers.get(roleId)?.interactive&&allowedUrl(url))void window.loadURL(url).catch(()=>{});return {action:'deny'};});
+   // Official scripts may request focus or open a page after a failed request.
+   // A transport window can become visible only during a user-opened verification flow.
+   const keepBackground=()=>{if(!workers.get(roleId)?.interactive&&!disposed&&!window.isDestroyed())window.hide();};
+   for(const name of ['show','showInactive','focus'])if(typeof window[name]==='function'){const original=window[name].bind(window);window[name]=(...args)=>{if(workers.get(roleId)?.interactive)return original(...args);};}
+   // Native page focus can bypass the JS methods; hide after its show event completes.
+   window.on('show',()=>queueMicrotask(keepBackground));window.on('focus',()=>queueMicrotask(keepBackground));
    window.on('close',event=>{if(!disposed){event.preventDefault();window.hide();}});
    const httpStatuses=new Map();browserSession.webRequest?.onResponseStarted({urls:['https://xyq.cbg.163.com/cgi-bin/recommend.py*']},details=>{if(httpStatuses.size>=100)httpStatuses.delete(httpStatuses.keys().next().value);httpStatuses.set(responseKey(details.url),{at:Date.now(),status:details.statusCode});});
-   worker={roleId,session:browserSession,window,version:null,queue:Promise.resolve(),page:null,httpStatuses};workers.set(roleId,worker);
+   worker={interactive:false,roleId,session:browserSession,window,version:null,queue:Promise.resolve(),page:null,httpStatuses};workers.set(roleId,worker);
   }
   return worker;
  }
- async function acquire(roleId){
+ // Refresh/cancel must not call WebContents.stop(): stopping an in-flight
+ // navigation triggers a Chromium NavigationRequest assertion on supported Electron builds.
+ // Keep the native navigation alive, but let the cancelled caller return immediately.
+ async function awaitNavigation(flight,signal){
+  signal?.throwIfAborted();let timer,abort;
+  try{return await Promise.race([flight.promise,new Promise((_,reject)=>{
+   timer=setTimeout(()=>reject(Error('官方页面仍在加载，请稍后重试')),pageLoadTimeoutMs);
+   if(signal){abort=()=>reject(signal.reason||Error('请求已取消'));signal.addEventListener('abort',abort,{once:true});if(signal.aborted)abort();}
+  })]);}finally{clearTimeout(timer);if(abort)signal.removeEventListener('abort',abort);}
+ }
+ async function acquire(roleId,{signal}={}){
   const role=await roles.get(roleId),worker=workerFor(roleId),version=role.cookieVersion||0;
+  if(worker.loading)await awaitNavigation({promise:worker.loading.promise.catch(()=>{})},signal);
+  signal?.throwIfAborted();
   if(worker.version!==version){
    await worker.session.clearStorageData();
    for(const row of role.cookies){const cookie=seedCookie(row);if(cookie)await worker.session.cookies.set(cookie);}
@@ -75,8 +93,10 @@ function createOfficialClient({BrowserWindow,session,roles,delay=wait,now=Date.n
   let state;
   for(let attempt=0;attempt<2;attempt++){
    signal?.throwIfAborted();worker.page=null;
-   let timer,abort;const loading=worker.window.loadURL(page);
-   try{await Promise.race([loading,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('官方页面加载超时')),30000);if(signal){abort=()=>reject(signal.reason||Error('请求已取消'));signal.addEventListener('abort',abort,{once:true});}})]);}catch(error){worker.window.webContents.stop();throw error;}finally{clearTimeout(timer);if(abort)signal.removeEventListener('abort',abort);}
+   const flight={promise:worker.window.loadURL(page)};worker.loading=flight;
+   const clear=()=>{if(worker.loading===flight)worker.loading=null;};flight.promise.then(clear,clear);
+   await awaitNavigation(flight,signal);
+   signal?.throwIfAborted();
    const actual=worker.window.webContents.getURL();if(new URL(actual).origin!=='https://xyq.cbg.163.com')throw Error('官方页面已跳转，请在当前会话中处理登录状态');
    if(!jsonp){worker.page=actual===page?page:null;return;}
    for(let poll=0;poll<9;poll++){
@@ -97,7 +117,7 @@ function createOfficialClient({BrowserWindow,session,roles,delay=wait,now=Date.n
  async function perform(roleId,url,options={}){
   validateTarget(url,options.method||'GET');const {signal}=options;signal?.throwIfAborted();await roles.get(roleId);const worker=workerFor(roleId);
   const operation=async()=>{
-   signal?.throwIfAborted();const current=await acquire(roleId),search=new URL(url).pathname==='/cgi-bin/recommend.py';
+   signal?.throwIfAborted();const current=await acquire(roleId,{signal}),search=new URL(url).pathname==='/cgi-bin/recommend.py';
    if(search&&current.cooldown?.until>now())throw Object.assign(Error(current.cooldown.message+'；已暂停该角色搜索，请 '+Math.ceil((current.cooldown.until-now())/1000)+' 秒后重试'),{code:'OFFICIAL_TEMPORARILY_UNAVAILABLE',retryAfterSeconds:Math.ceil((current.cooldown.until-now())/1000)});
    try{await prepare(current,pageFor(url,options.headers?.Referer),signal,{jsonp:new URL(url).pathname==='/cgi-bin/recommend.py'&&(options.method||'GET')==='GET'});}catch(error){current.page=null;if(error.code==='OFFICIAL_PAGE_UNAVAILABLE'){current.cooldown={until:now()+30000,message:error.message};error.retryAfterSeconds=30;}if(error.officialResponse&&!signal?.aborted)return new Response(JSON.stringify(error.officialResponse),{status:200,headers:{'content-type':'application/json; charset=UTF-8'}});throw error;}
    signal?.throwIfAborted();
@@ -112,10 +132,10 @@ function createOfficialClient({BrowserWindow,session,roles,delay=wait,now=Date.n
    }catch(error){
     current.page=null;
     const http=current.httpStatuses.get(responseKey(url));if(!signal?.aborted&&http?.at>=startedAt&&http.status>=400)return new Response('',{status:http.status});throw error;
-   }finally{if(abort)signal.removeEventListener('abort',abort);if(roles.syncBrowserCookies&&!roles.verifying?.has(roleId))await roles.syncBrowserCookies(roleId,{version:current.version,cookies:savedCookies(await current.session.cookies.get({}))});}
+   }finally{if(abort)signal.removeEventListener('abort',abort);if(roles.syncBrowserCookies&&!roles.verifying?.has(roleId)){await roles.syncBrowserCookies(roleId,{version:current.version,cookies:savedCookies(await current.session.cookies.get({}))});}}
   };
   const result=worker.queue.then(operation,operation);worker.queue=result.catch(()=>{});return result;
  }
- return {acquire,fetch:perform,adoptVersion(roleId,version){const worker=workers.get(roleId);if(worker){worker.version=version;worker.cooldown=null;worker.page=worker.window.webContents.getURL();}},invalidate(roleId){const worker=workers.get(roleId);if(worker){worker.version=null;worker.page=null;}},dispose(){disposed=true;for(const worker of workers.values()){worker.window.destroy();void worker.session.clearStorageData().catch(()=>{});}workers.clear();}};
+ return {acquire,fetch:perform,setInteractive(roleId,value){const worker=workers.get(roleId);if(worker){worker.interactive=value===true;if(!worker.interactive&&!worker.window.isDestroyed())worker.window.hide();}},adoptVersion(roleId,version){const worker=workers.get(roleId);if(worker){worker.version=version;worker.cooldown=null;worker.page=worker.window.webContents.getURL();}},invalidate(roleId){const worker=workers.get(roleId);if(worker){worker.version=null;worker.page=null;}},dispose(){disposed=true;for(const worker of workers.values()){worker.window.destroy();void worker.session.clearStorageData().catch(()=>{});}workers.clear();}};
 }
 module.exports={createOfficialClient,pageFor,requestScript,validateTarget,pageStateScript,officialUserAgent};

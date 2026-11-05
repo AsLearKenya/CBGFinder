@@ -1,14 +1,14 @@
-(function(root,factory){const api=factory(typeof module==='object'&&module.exports?require('./equipment-attribute-focus.js'):root.EquipmentAttributeFocus,typeof module==='object'&&module.exports?require('./equipment-openings.js'):root.EquipmentOpenings,typeof module==='object'&&module.exports?require('./lingshi.js'):root.Lingshi);if(typeof module==='object'&&module.exports)module.exports=api;else root.EquipmentValuation=api;})(typeof globalThis==='object'?globalThis:this,function(AttributeFocus,EquipmentOpenings,Lingshi){
+(function(root,factory){const api=factory(typeof module==='object'&&module.exports?require('./equipment-attribute-focus.js'):root.EquipmentAttributeFocus,typeof module==='object'&&module.exports?require('./equipment-openings.js'):root.EquipmentOpenings,typeof module==='object'&&module.exports?require('./lingshi.js'):root.Lingshi,typeof module==='object'&&module.exports?require('./pet-equipment-valuation.js'):root.PetEquipmentValuation);if(typeof module==='object'&&module.exports)module.exports=api;else root.EquipmentValuation=api;})(typeof globalThis==='object'?globalThis:this,function(AttributeFocus,EquipmentOpenings,Lingshi,PetValuation){
  'use strict';
- const COMPARISON_VERSION=29;
+ const COMPARISON_VERSION=30;
  const STORAGE_KEY='cbg:equipment-valuation:v1';
  const GEM_TYPES=Object.freeze({'1':{name:'红玛瑙',type:'4011'},'2':{name:'太阳石',type:'4002'},'3':{name:'舍利子',type:'4012'},'4':{name:'光芒石',type:'4004'},'5':{name:'月亮石',type:'4003'},'6':{name:'黑宝石',type:'4010'},'7':{name:'神秘石',type:null},'12':{name:'翡翠石',type:'4249'},'4006':{name:'红宝石',type:null},'4007':{name:'黄宝石',type:null},'4008':{name:'蓝宝石',type:null},'4009':{name:'绿宝石',type:null}});
- const MATERIALS=Object.freeze([...Object.entries(GEM_TYPES).filter(([,gem])=>gem.type!==null).map(([gemId,gem])=>({id:gemId,...gem,family:'gem'})),{id:'starlight',name:'星辉石',type:'4244',family:'starlight'},{id:'dust',name:'五色灵尘',type:'61719',family:'dust'},...Lingshi.CLOCK_TYPES]);
- function materialMaxGrade(material){const family=typeof material==='string'?material:material.family;return family==='gem'?20:family==='clock'?8:15;}
- function marketGrades(material){return material.family==='clock'?[6]:MARKET_GRADES;}
+ const MATERIALS=Object.freeze([...Object.entries(GEM_TYPES).filter(([,gem])=>gem.type!==null).map(([gemId,gem])=>({id:gemId,...gem,family:'gem'})),{id:'starlight',name:'星辉石',type:'4244',family:'starlight'},{id:'dust',name:'五色灵尘',type:'61719',family:'dust'},...Lingshi.CLOCK_TYPES,...PetValuation.MATERIALS]);
+ function materialMaxGrade(material){const family=typeof material==='string'?material:material.family;return family==='point'?1:family==='gem'?20:family==='clock'?8:15;}
+ function marketGrades(material){return material.family==='point'?[1]:material.family==='clock'?[6]:MARKET_GRADES;}
  function materialUnits(family,grade){
   const n=integer(grade,'材料等级',1,materialMaxGrade(family));
-  if(family==='clock')return Lingshi.CLOCK_UNITS[n];if(family==='gem')return 2**(n-1);if(family==='starlight')return 3**(n-1);if(family!=='dust')throw Error('未知材料类型');
+  if(family==='point')return 1;if(family==='clock')return Lingshi.CLOCK_UNITS[n];if(['gem','jingpo'].includes(family))return 2**(n-1);if(family==='starlight')return 3**(n-1);if(family!=='dust')throw Error('未知材料类型');
   let prev=1,current=2;if(n===1)return prev;for(let i=3;i<=n;i++){const next=2*current+prev;prev=current;current=next;}return current;
  }
  function materialPrice(material,grade,quote){
@@ -20,6 +20,7 @@
   integer(grade,'材料等级',1,materialMaxGrade(material));
   const custom=entry?.custom?.[material.id]||{},market=entry?.quotes?.[material.id]||{},valid=q=>Number.isSafeInteger(q?.priceCents)&&q.priceCents>0;
   if(valid(custom[grade]))return {...custom[grade],grade,source:'custom',basisGrade:grade,serverId:String(entry.serverId)};
+  if(material.family==='point')return valid(market[grade])?{...market[grade],grade,source:'market',basisGrade:grade,serverId:String(entry.serverId)}:null;
   const reliable=Object.entries(market).filter(([g,q])=>valid(q)&&Number(g)>=1&&Number(g)<=(materialMaxGrade(material))&&q.priceCents>1000).map(([g,q])=>({...q,grade:Number(g),source:'market'}));
   const floorLimited=valid(market[grade])&&market[grade].floorLimited!==false&&market[grade].priceCents<=1000;
   if((marketGrades(material).includes(grade)||material.family==='clock')&&valid(market[grade])&&!floorLimited)return {...market[grade],grade,source:'market',basisGrade:grade,serverId:String(entry.serverId)};

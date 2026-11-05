@@ -1,0 +1,14 @@
+/* Portable task configuration. Authentication, identifiers and runtime data never cross this boundary. */
+(function(root,factory){const api=factory(typeof module==='object'&&module.exports?require('./task-storage.js'):root.TaskStorage);if(typeof module==='object'&&module.exports)module.exports=api;else root.TaskTransfer=api;})(globalThis,function(Storage){
+ 'use strict';
+ const FORMAT='cbg-finder.tasks',VERSION=1,MAX_TASKS=1000,MAX_TEXT=5*1024*1024;
+ const FIELDS=['name','category','servers','interval','equipmentFilters','petFilters','roleFilters','petEquipmentFilters','lingshiFilters','yupoFilters'];
+ const PRIVATE=new Set(['__proto__','prototype','constructor','roleId','gameRoleId','account','password','cookies','cookie','token','session']);
+ function clean(value,depth=0){if(depth>30)throw Error('任务参数嵌套过深');if(Array.isArray(value))return value.map(v=>clean(v,depth+1));if(value&&typeof value==='object')return Object.fromEntries(Object.entries(value).filter(([k])=>!PRIVATE.has(k)).map(([k,v])=>[k,clean(v,depth+1)]));return value;}
+ function task(source,index=0){try{if(!source||typeof source!=='object'||Array.isArray(source))throw Error('任务必须是对象');const picked=clean(Object.fromEntries(FIELDS.filter(k=>Object.hasOwn(source,k)).map(k=>[k,source[k]])));if(typeof picked.name!=='string'||!picked.name.trim()||picked.name.trim().length>40)throw Error('任务名称需为1～40个字符');picked.name=picked.name.trim();const projected=Storage.project({...picked,id:'portable-'+index});return Object.fromEntries(FIELDS.filter(k=>projected[k]!==undefined).map(k=>[k,projected[k]]));}catch(e){throw Error('第'+(index+1)+'个任务：'+e.message);}}
+ function documentFor(tasks){if(!Array.isArray(tasks)||!tasks.length||tasks.length>MAX_TASKS)throw Error('请选择1～'+MAX_TASKS+'个任务');return {format:FORMAT,version:VERSION,tasks:tasks.map(task)};}
+ function stringify(tasks){const text=JSON.stringify(documentFor(tasks),null,2);if(new TextEncoder().encode(text).length>MAX_TEXT)throw Error('导出文本超过5MB，请分批导出');return text;}
+ function parse(text){if(typeof text!=='string'||text.length>MAX_TEXT||new TextEncoder().encode(text).length>MAX_TEXT)throw Error('任务文本不能超过5MB');let data;try{data=JSON.parse(text.replace(/^\uFEFF/,'').trim());}catch{throw Error('JSON格式无效，请粘贴完整的任务导出文本');}if(data?.format!==FORMAT||data.version!==VERSION)throw Error('无法识别任务格式或版本，请使用本程序导出的JSON');return documentFor(data.tasks).tasks;}
+ function resolveServers(servers,catalog){const missing=[],resolved=servers.map(s=>{const exact=catalog.find(c=>c.key===s.key&&String(c.id)===String(s.id)&&c.name===s.name)||catalog.find(c=>String(c.id)===String(s.id)&&c.name===s.name),sameId=catalog.filter(c=>String(c.id)===String(s.id));const match=exact||(sameId.length===1?sameId[0]:null);if(!match){missing.push(s);return {...s};}return {...match};});return {servers:resolved,missing};}
+ return {FORMAT,VERSION,MAX_TASKS,MAX_TEXT,FIELDS,task,documentFor,stringify,parse,resolveServers};
+});

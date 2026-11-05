@@ -18,7 +18,7 @@
   if(!['装备','角色','灵饰','上古玉魄'].includes(detail.category))throw Error('目前仅支持装备、灵饰、上古玉魄和角色估价');
   const raw={...(detail.listing||{}),eid:identity.eid,serverid:identity.serverId,equip_name:detail.name,equip_level:detail.level,price:Math.round(Number(detail.price)*100),server_name:detail.listing?.server_name||serverName,onsale_expire_time_desc:detail.market?.remaining||detail.listing?.onsale_expire_time_desc,large_equip_desc:detail.styledDescription};
   if(!Number.isFinite(raw.price)||raw.price<=0)throw Error('商品详情缺少有效挂牌价格，无法估价');
-  if(['灵饰','上古玉魄'].includes(detail.category))return R.normalize(raw,{config,category:detail.category,taskId});
+  if(['灵饰','上古玉魄','召唤兽装备'].includes(detail.category))return R.normalize(raw,{config,category:detail.category,taskId});
   if(detail.category==='角色'){
    const result=R.normalize({...raw,school:detail.roleInfo?.valuationData?.school,icon:''},{config,category:'角色',taskId});
    return {...result,name:detail.name,icon:detail.roleInfo?.icon||'',type:detail.roleInfo?.valuationData?.school||result.type,roleValuationData:detail.roleInfo?.valuationData,roleValuationDetailLoaded:true,roleReportDetails:typeof RoleValuationImage==='object'?RoleValuationImage.snapshot(detail,result):undefined};

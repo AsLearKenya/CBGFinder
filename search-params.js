@@ -180,7 +180,7 @@
   return response.equip_list.length>=count?page+1:null;
  }
  function requestUrl(plan,now=Date.now()){return ENDPOINT+'?'+new URLSearchParams({callback:'cbg_raw_response',_:String(now),...plan.params}).toString();}
- function roleTaskError(tasks,task){if(!task.roleId)return "";const peers=tasks.filter(t=>t.roleId===task.roleId);return peers.findIndex(t=>t.id===task.id)>=policy.roleTaskLimit?`同一角色最多绑定${policy.roleTaskLimit}个任务，请删除多余任务或改绑其他角色`:"";}
+ function roleTaskError(tasks,task){if(policy.roleTaskLimit==null||!task.roleId)return "";const peers=tasks.filter(t=>t.roleId===task.roleId);return peers.findIndex(t=>t.id===task.id)>=policy.roleTaskLimit?`同一角色最多绑定${policy.roleTaskLimit}个任务，请删除多余任务或改绑其他角色`:"";}
  function roleEnabledTaskError(tasks,task){if(!task.roleId||!task.enabled)return '';return tasks.filter(t=>t.id!==task.id&&t.roleId===task.roleId&&t.enabled).length>=policy.roleEnabledTaskLimit?`同一角色最多开启${policy.roleEnabledTaskLimit}个任务，请先关闭其他任务`:'';}
  return {roleEnabledTaskError,normalizeRoleFilters,yupoFilterFields,yupoBaseParams,lingshiBasicFields,lingshiFilterFields,lingshiBaseParams,petEquipNumericFields,petEquipFlags,petEquipFilterFields,petEquipBaseParams,policy,roleTaskError,normalizeServers,ENDPOINT,attributeMap,roleNumericGroups,roleNumericFields,roleFilterFields,roleBaseParams,petNumericFields,petFilterFields,petBaseParams,supportsCategory,priceCents,levelRanges,baseParams,buildPlans,pagePlan,nextPage,requestUrl};
 });

@@ -49,3 +49,7 @@
 .art-armor,.art-helmet,.art-necklace,.art-belt,.art-boots,.art-equipment,.art-shield{background:#f6eee4;color:#b99a70}
 .art-ring,.art-earring,.art-bracelet,.art-pendant{background:#f3eef7;color:#a28bb6}
 .art-jade{background:#eaf3ef;color:#74a38d}
+
+.pet-equipment-risk{max-width:340px;margin:7px 0 0;font-size:11px;line-height:1.6;font-weight:500}.pet-equipment-risk.is-unestimated{color:#c93b3b}.pet-equipment-risk.is-rough{color:#b77900}
+
+.task-transfer-modal{max-width:800px}.task-transfer-tools,.task-import-review{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.task-transfer-list{max-height:220px;overflow:auto;border:1px solid var(--border,#e1e6ed);border-radius:8px;margin:12px 0}.task-transfer-list label{display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid #edf0f5}.task-transfer-list label:last-child{border-bottom:0}.task-transfer-list small{display:block;margin-top:4px;color:#7d899e}.task-transfer-text-label{display:block;margin:14px 0 8px}.task-transfer-text{display:block;width:100%;box-sizing:border-box;resize:vertical;min-height:150px;padding:12px;border:1px solid #dce3ee;border-radius:8px;font:12px/1.6 ui-monospace,monospace}.task-transfer-file{display:block;margin:16px 0}.task-transfer-file input{display:block;margin-top:8px}.task-import-review{padding:14px 20px;background:#fff6ed;border-bottom:1px solid #efdfcb;font-size:12px}.task-import-review p{flex-basis:100%;margin:0}.task-import-review .text-button{margin-left:auto}

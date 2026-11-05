@@ -1,7 +1,7 @@
 'use strict';
 const policy=require('./search-policy');
 class RoleRequestGate{
- constructor({limit=policy.roleConcurrency,taskLimit=policy.roleTaskLimit,minInterval=policy.minRequestGapMs,now=Date.now}={}){this.limit=limit;this.taskLimit=taskLimit;this.minInterval=minInterval;this.now=now;this.roles=new Map();}
+ constructor({limit=policy.roleConcurrency,taskLimit=policy.roleTaskLimit??Infinity,minInterval=policy.minRequestGapMs,now=Date.now}={}){this.limit=limit;this.taskLimit=taskLimit;this.minInterval=minInterval;this.now=now;this.roles=new Map();}
  pool(id){if(!this.roles.has(id))this.roles.set(id,{active:0,pending:[],tasks:new Map(),nextStart:0,timer:null,blocked:''});return this.roles.get(id);}
  snapshot(id){const p=this.pool(id);return {active:p.active,queued:p.pending.length,blocked:p.blocked,concurrency:this.limit};}
  resume(id){this.pool(id).blocked='';this.pump(id);}

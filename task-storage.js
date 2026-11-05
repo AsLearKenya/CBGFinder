@@ -18,7 +18,7 @@
   if(typeof task.changeNotifications==='boolean')result.changeNotifications=task.changeNotifications;
   if(typeof task.roleId==='string')result.roleId=task.roleId;
   if(typeof task.lastError==='string')result.lastError=task.lastError;
-  if(['角色','灵饰','上古玉魄'].includes(task.category))result.valuationEnabled=task.valuationEnabled===true;
+  if(['角色','灵饰','上古玉魄','召唤兽装备'].includes(task.category))result.valuationEnabled=task.valuationEnabled===true;
   if(task.category==='装备'){
    result.valuationEnabled=task.valuationEnabled===true;
    const source=task.equipmentFilters||{};
@@ -47,5 +47,5 @@
   return tasksCopy(data.tasks).map(task=>({...task,nextRunAt:task.enabled?now+task.interval*60000:null}));
  }
  function save(storage,tasks){storage.setItem(KEY,JSON.stringify({version:1,savedAt:Date.now(),tasks:tasksCopy(tasks)}));}
- return {KEY,load,save};
+ return {KEY,load,save,project};
 });

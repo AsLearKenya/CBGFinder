@@ -1,14 +1,14 @@
 /* Spirit ornament comparison rules. All comparisons use stats before starlight. */
 (function(root,factory){const api=factory(typeof module==='object'&&module.exports?require('./equipment-valuation.js'):root.EquipmentValuation,typeof module==='object'&&module.exports?require('./lingshi.js'):root.Lingshi);if(typeof module==='object'&&module.exports)module.exports=api;else root.LingshiValuation=api;})(globalThis,function(B,L){
  'use strict';
- const VERSION=9,FRONT={spell:['法术伤害','法术暴击等级','法术伤害结果','速度','伤害'],physical:['伤害','物理暴击等级','狂暴等级','穿刺等级','速度'],fixed:['固定伤害','伤害'],support:['速度','封印命中等级','治疗能力']},AUX=['治疗能力','封印命中等级'];
- const IDS={'固定伤害':'1','伤害':'2','速度':'3','法术伤害':'4','狂暴等级':'5','物理暴击等级':'6','法术暴击等级':'7','封印命中等级':'8','法术伤害结果':'9','穿刺等级':'10','治疗能力':'11','气血':'12','防御':'13','法术防御':'14','抗物理暴击':'15','抗法术暴击':'16','抵抗封印等级':'17','格挡等级':'18','回复能力':'19'};
- const MAIN={'伤害':'damage','防御':'defense','法术伤害':'magic_damage','法术防御':'magic_defense','封印命中等级':'fengyin','抵抗封印等级':'anti_fengyin','速度':'speed'},SCORE={'气血':3,'防御':3,'法术防御':2,'格挡等级':1,'抵抗封印等级':1,'回复能力':1,'抗物理暴击':0,'抗法术暴击':0},TOL={'气血':10,'防御':2,'法术防御':2,'格挡等级':3,'抵抗封印等级':3,'回复能力':3};
+ const VERSION=10,FRONT={spell:['法术伤害','法术暴击等级','法术伤害结果','速度','伤害'],physical:['伤害','物理暴击等级','狂暴等级','穿刺等级','速度'],fixed:['固定伤害','伤害'],support:['速度','封印命中等级','治疗能力']},AUX=['治疗能力','封印命中等级'];
+ const IDS={'固定伤害':'1','伤害':'2','速度':'3','法术伤害':'4','狂暴等级':'5','物理暴击等级':'6','法术暴击等级':'7','封印命中等级':'8','法术伤害结果':'9','穿刺等级':'10','治疗能力':'11','气血':'12','防御':'13','法术防御':'14','抗物理暴击':'15','抗法术暴击':'16','抵抗封印等级':'17','格挡值':'18','回复能力':'19'};
+ const MAIN={'伤害':'damage','防御':'defense','法术伤害':'magic_damage','法术防御':'magic_defense','封印命中等级':'fengyin','抵抗封印等级':'anti_fengyin','速度':'speed'},SCORE={'气血':3,'防御':3,'法术防御':2,'格挡值':1,'抵抗封印等级':1,'回复能力':1,'抗物理暴击':0,'抗法术暴击':0},TOL={'气血':10,'防御':2,'法术防御':2,'格挡值':3,'抵抗封印等级':3,'回复能力':3};
  const SUPER_SIMPLE_LEVELS=new Set([80,120,140,160]),superSimple=item=>SUPER_SIMPLE_LEVELS.has(Number(item.level))&&(item.specialEffects||[]).some(s=>s.includes('超级简易'));
  const distribution=rows=>rows.map(r=>SCORE[r.label]??0).sort((a,b)=>a-b).join(',');
  const front=i=>['61','62'].includes(String(i.equipmentKindId)),key=rows=>rows.map(r=>r.label).sort().join('|'),counts=rows=>rows.reduce((o,r)=>(o[r.label]=(o[r.label]||0)+1,o),{});
  function metadata(styled,{grade,failures=0}={}){const summary=L.initialSummary(styled);return {main:summary.attributes[0]||null,added:summary.added,stone:L.clockStone({},styled),grade:Number(grade??L.plain(styled).match(/精[炼练]等级\s*(\d+)/)?.[1]??0),failures:Number(failures)};}
- function meta(item){const m=item.lingshiMeta;return m?{...m,stone:m.stone??L.clockStone({},item.description)}:m;}
+ function meta(item){const m=item.lingshiMeta;return m?{...m,main:m.main?{...m.main,label:L.canonicalName(m.main.label)}:m.main,added:m.added?.map(r=>({...r,label:L.canonicalName(r.label)})),stone:m.stone??L.clockStone({},item.description)}:m;}
  const tripleSame=rows=>rows?.length===3&&rows.every(r=>r.label===rows[0].label);
  function plans(item){
   const m=meta(item);if(!m?.main||!MAIN[m.main.label]||!Number.isFinite(m.main.value)||![2,3].includes(m.added?.length)||m.added.some(a=>!IDS[a.label]||!Number.isFinite(a.value)))return [];
