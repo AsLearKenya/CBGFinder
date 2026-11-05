@@ -5,7 +5,7 @@ const PetValuation=require('./pet-equipment-valuation.js'),Sampling=require('./v
 const {inferredAccountSecurity}=require('./auth/account-security.cjs');
 const THREE_HOURS=3*60*60*1000;
 function stable(value){if(Array.isArray(value))return value.map(stable);if(value&&typeof value==='object')return Object.fromEntries(Object.keys(value).sort().map(k=>[k,stable(value[k])]));return value;}
-function slim(item){if(item.valuationMeta)item={...item,valuationMeta:{...item.valuationMeta,roleExclusive:V.isRoleExclusive(item),holeSets:Openings.parse(item.valuationMeta,item.description||(item.traits||[]).join('\n'))}};return Object.fromEntries(['id','detailEid','orderSn','collected','serverId','server','area','name','type','kind','equipmentKindId','level','price','priceDisplay','icon','valuationMeta','attributes','added','specialSkills','specialEffects','suits','carriedTarget'].filter(k=>item[k]!==undefined).map(k=>[k,item[k]]));}
+function slim(item){if(item.valuationMeta)item={...item,valuationMeta:{...item.valuationMeta,roleExclusive:V.isRoleExclusive(item),gemCounts:V.gemCountsForItem(item),holeSets:Openings.parse(item.valuationMeta,item.description||(item.traits||[]).join('\n'))}};return Object.fromEntries(['id','detailEid','orderSn','collected','serverId','server','area','name','type','kind','equipmentKindId','level','price','priceDisplay','icon','valuationMeta','attributes','added','specialSkills','specialEffects','suits','traits','carriedTarget'].filter(k=>item[k]!==undefined).map(k=>[k,item[k]]));}
 function createEstimator({roles,gate,officialFetch,isCaptcha,isExpired,cacheDirectory=null,now=Date.now}){
  const fullCache=new Map(),pending=new Map(),materialCache=new Map(),materialPending=new Map(),materialGradePending=new Map(),jingpoMarkets=new Map(),ageCache=new Map();let loading,saveQueue=Promise.resolve(),materialLoading,materialSaveQueue=Promise.resolve(),preloading=null;
  const file=cacheDirectory?path.join(cacheDirectory,'equipment-valuation-cache.json'):null;
@@ -100,23 +100,23 @@ function createEstimator({roles,gate,officialFetch,isCaptcha,isExpired,cacheDire
  async function gem(context,item){
   const m=item.valuationMeta;if(!m||!Number.isInteger(m.grade))throw Error('样本未提供宝石等级');
   const ids=m.gemIds||[];if(m.grade===0)return {valueCents:0,quotes:{}};
-  if(ids.some(id=>V.GEM_TYPES[id]?.type===null))return {...V.gemValue({gemIds:ids,grade:m.grade},context.settings),quotes:{}};
-  const quotes={};for(const id of ids)quotes[id]=await quote(context,context.buyerServer,id,m.grade);
-  return {...V.gemValue({gemIds:ids,grade:m.grade,quotes},context.settings),quotes};
+  const quotes={};for(const id of ids.filter(id=>V.GEM_TYPES[id]?.type))quotes[id]=await quote(context,context.buyerServer,id,m.grade);
+  return {...V.gemValue({gemIds:ids,grade:m.grade,quotes,gemCounts:V.gemCountsForItem(item)},context.settings),quotes};
  }
  const security=error=>/验证码|MIBAO_AUTH|OTP_AUTH|请求过于频繁|角色Cookie|登录过期|登录超时/.test(error.message);
  async function prepare(context,item){
+  if(!Sampling.usableSample(item,context.buyerServer))return null;
   if(!item?.valuationMeta||!item.detailEid||!item.serverId||!Number.isFinite(item.price)||item.price<=0)return null;
   const same=String(item.serverId)===context.buyerServer;
-  if(!(item.valuationMeta.crossFeeCents>0||same&&context.buyerOld))return null;
-  try{const priced=await gem(context,item);const sample=V.sampleBase(item,priced.valueCents,context.settings,now());return {...sample,gemQuotes:priced.quotes};}catch(error){if(error.valuationFatal||security(error)||context.signal?.aborted)throw error;context.excluded++;context.exclusionReasons.add(error.message);return null;}
+  if(!(item.valuationMeta.crossFeeCents>0||same&&context.buyerOld||context.allowMissingCrossFee))return null;
+  try{const priced=await gem(context,item);const sample=V.sampleBase(item,priced.valueCents,context.settings,now());return {...sample,gemQuotes:priced.quotes,missingCrossFee:!same&&!(item.valuationMeta.crossFeeCents>0)};}catch(error){if(error.valuationFatal||security(error)||context.signal?.aborted)throw error;context.excluded++;context.exclusionReasons.add(error.message);return null;}
  }
  const hitCount=(target,prepared,rules,context)=>[...prepared.values()].filter(row=>(!context?.sampleUsable||context.sampleUsable(target,row))&&(context?.matches?context.matches(target,row):V.similar(target,row,rules))).length;
  async function prepareRows(context,entry,prepared,attempted,targets,rules,counter){
   // Keep the unprocessed raw rows cached, but never query gem prices for rows
   // that can only serve targets whose five-sample quota is already full.
   const counts=new Map(targets.map(target=>[target,counter?counter(target):hitCount(target,prepared,rules,context)])),remaining=new Set(targets.filter(target=>counts.get(target)<5));
-  for(const row of entry.rows){
+  for(const row of [...entry.rows].sort((a,b)=>Number(!(a.valuationMeta?.crossFeeCents>0||String(a.serverId)===context.buyerServer))-Number(!(b.valuationMeta?.crossFeeCents>0||String(b.serverId)===context.buyerServer)))){
    if(!remaining.size)break;if(attempted.has(row.id))continue;
    const matches=[...remaining].filter(target=>(!context.sampleUsable||context.sampleUsable(target,row))&&(context.matches?context.matches(target,row):V.similar(target,row,rules)));if(!matches.length)continue;
    attempted.add(row.id);const sample=await prepare(context,row);if(!sample)continue;
@@ -132,35 +132,38 @@ function createEstimator({roles,gate,officialFetch,isCaptcha,isExpired,cacheDire
   return {...task,servers:[],equipmentFilters:next};
  }
  async function collectScope(context,entry,prepared,attempted,targets,filters,rules,counter=null){
-  const count=counter||((target)=>hitCount(target,prepared,rules,context)),unresolved=()=>targets.filter(target=>context.scopeEligible(target)&&count(target)<5),queue=V.planRanges(unresolved(),rules.filter(rule=>!rule.key.startsWith('addon:')));
+  const count=counter||((target)=>hitCount(target,prepared,rules,context)),unresolved=()=>targets.filter(target=>context.scopeEligible(target)&&count(target)<5),queue=V.planRanges(unresolved(),rules);
   const cursors=new Map(),rawRows=new Map(entry.rows.map(row=>[row.id,row]));
   while(queue.length){
    const range=queue.shift();await prepareRows(context,entry,prepared,attempted,range.targets,rules,counter);const wanted=range.targets.filter(target=>context.scopeEligible(target)&&count(target)<5);if(!wanted.length)continue;
-   const query={...(range.query||queryFor(context.task,filters,wanted,rules)),servers:context.scopeServer?[context.scopeServer]:[]},signature=JSON.stringify(stable(query.equipmentFilters));if(!cursors.has(signature))cursors.set(signature,{page:1,seen:new Set()});const cursor=cursors.get(signature);if(cursor.page===null)continue;
+   let nextQuery=range.query;
+   if(nextQuery&&(range.replans||0)<3){const narrowed=queryFor(context.task,filters,wanted,rules),before=nextQuery.equipmentFilters,after=narrowed.equipmentFilters;if(['sumMinimum',...Object.keys(V.METRICS)].some(k=>Number.isFinite(Number(after[k]))&&Number(after[k])>=Number(before[k]??0)+2)){nextQuery=narrowed;range.replans=(range.replans||0)+1;}}
+   const query={...(nextQuery||queryFor(context.task,filters,wanted,rules)),servers:context.scopeServer?[context.scopeServer]:[]},signature=JSON.stringify(stable(query.equipmentFilters));if(!cursors.has(signature))cursors.set(signature,{page:1,seen:new Set()});const cursor=cursors.get(signature);if(cursor.page===null)continue;
    context.stage=(context.scopeServer?context.scopeServer.name:'跨服')+'范围采样 · '+wanted.length+' 件待估商品';let narrowed=false;
    for(const plan of P.buildPlans(query)){let page=cursor.page;const seen=cursor.seen;while(page!==null){
     const params=P.pagePlan(plan,page).params,requestKey=JSON.stringify(stable(params));entry.pages??={};let pageRecord=entry.pages[requestKey];
     if(!pageRecord){const response=await data(context,params);const ids=[];for(const raw of response.equip_list){const item=R.normalize(raw,{taskId:context.task.id,category:'装备'});if(item?.id){ids.push(item.id);if(context.scopeServer)context.localIds.add(item.id);else context.fullIds.add(item.id);if(!rawRows.has(item.id))rawRows.set(item.id,slim(item));}}const fingerprint=JSON.stringify(ids);if(response.equip_list.length&&seen.has(fingerprint))throw Error('估价采样返回重复页，已停止');pageRecord={fingerprint,count:response.equip_list.length,nextPage:P.nextPage(response,page)};entry.pages[requestKey]=pageRecord;}
     if(pageRecord.count&&seen.has(pageRecord.fingerprint))throw Error('估价采样返回重复页，已停止');seen.add(pageRecord.fingerprint);cursor.page=pageRecord.nextPage;
-    entry.rows=[...rawRows.values()];context.updateRoutes(entry.rows);await prepareRows(context,entry,prepared,attempted,targets,rules,counter);
+    entry.rows=[...rawRows.values()];await prepareRows(context,entry,prepared,attempted,targets,rules,counter);
     const remaining=wanted.filter(target=>context.scopeEligible(target)&&count(target)<5);if(!remaining.length){narrowed=true;break;}
-    // Continue the price-ordered shared query after removing satisfied targets.
-    // Restarting at page one for every new lower bound repeatedly scans cheap goods.
-    if(cursor.page!==null){queue.push({targets:remaining,query});narrowed=true;break;}page=cursor.page;
+    // Continue the cursor while the remaining fuzzy range is unchanged;
+    // a meaningful higher lower bound gets a separate, deduplicated cursor.
+    if(cursor.page!==null){queue.push({targets:remaining,query,replans:range.replans||0});narrowed=true;break;}page=cursor.page;
    }if(narrowed)break;}
-   for(const target of wanted)if(!context.scopeServer&&context.scopeEligible(target)&&cursor.page===null&&count(target)>0)context.settled?.add(target.id);await context.publish?.();
+   for(const target of wanted)if(!context.scopeServer&&Sampling.mode(target)!=='probe'&&context.scopeEligible(target)&&cursor.page===null&&count(target)>0)context.settled?.add(target.id);await context.publish?.();
   }
  }
  async function collect(context,entry,prepared,attempted,targets,filters,rules,counter=null){
   const count=counter||((target)=>hitCount(target,prepared,rules,context));
   context.scopeServer=null;context.scopeEligible=t=>!context.localTargets.has(t.id);
   await collectScope(context,entry,prepared,attempted,targets,filters,rules,counter);
+  for(const t of targets)if(Sampling.needsLocal(t,[...prepared.values()].filter(sample=>context.sampleUsable(t,sample)&&context.matches(t,sample))))context.localTargets.add(t.id);
   for(const server of Sampling.SERVERS){
    if(!targets.some(t=>context.localTargets.has(t.id)&&count(t)<5))break;
    context.scopeServer=server;context.scopeEligible=t=>context.localTargets.has(t.id);
    await collectScope(context,entry,prepared,attempted,targets,filters,rules,counter);
   }
-  entry.fullIds=[...context.fullIds];entry.localIds=[...context.localIds];context.scopeServer=null;
+  entry.localTargetIds=[...context.localTargets];entry.fullIds=[...context.fullIds];entry.localIds=[...context.localIds];context.scopeServer=null;
   for(const t of targets)if(count(t)>0)context.settled.add(t.id);await context.publish?.();
  }
  async function fallbackSamples(context,entry,prepared,attempted,targets,filters,rules,search=false){
@@ -196,18 +199,22 @@ function createEstimator({roles,gate,officialFetch,isCaptcha,isExpired,cacheDire
   await load();const key=crypto.createHash('sha256').update(JSON.stringify(stable({role:task.roleId,server:context.buyerServer,filters,samplingModes:[...new Set(eligible.map(t=>Sampling.mode(t)))].sort(),samplingVersion:Sampling.VERSION,version:V.COMPARISON_VERSION}))).digest('hex');
   if(pending.has(key)){try{await pending.get(key);}catch(error){if(signal?.aborted||security(error))throw error;}}
   signal?.throwIfAborted();let entry=fullCache.get(key),cached=!!(entry&&now()-entry.at<THREE_HOURS),prepared=new Map(),attempted=new Set();
-  context.fullIds=new Set(entry?.fullIds||[]);context.localIds=new Set(entry?.localIds||[]);context.localTargets=new Set(eligible.filter(t=>Sampling.mode(t)==='local').map(t=>t.id));
-  context.sampleUsable=(target,sample)=>!context.localTargets.has(target.id)||context.localIds.has(sample.id);
-  context.updateRoutes=rows=>{for(const t of eligible)if(!context.localTargets.has(t.id)&&Sampling.needsLocal(t,rows.filter(row=>context.fullIds.has(row.id)&&context.matches(t,row))))context.localTargets.add(t.id);};
-  if(entry)context.updateRoutes(entry.rows);
+  context.fullIds=new Set(entry?.fullIds||[]);context.localIds=new Set(entry?.localIds||[]);context.localTargets=new Set([...(entry?.localTargetIds||[]),...eligible.filter(t=>Sampling.mode(t)==='local').map(t=>t.id)]);
+  context.missingFeeTargets=new Set();
+  context.sampleUsable=(target,sample)=>(sample.valuationMeta?.crossFeeCents>0||String(sample.serverId)===context.buyerServer||context.missingFeeTargets.has(target.id))&&Sampling.usableSample(sample,context.buyerServer)&&(Sampling.mode(target)!=='local'||context.localIds.has(sample.id));
+
+  async function supplementMissingFees(entry,prepared,attempted,targets){
+   for(const target of targets)if(hitCount(target,prepared,rules,context)<5)context.missingFeeTargets.add(target.id);
+   context.allowMissingCrossFee=true;await prepareRows(context,entry,prepared,attempted,targets,rules);await context.publish?.();
+  }
   const refreshIds=new Set(),emitted=new Map(),normalCounts=new Map(),downgradable=new Set(eligible.filter(target=>V.downgradeVariants(target).length).map(target=>target.id));
   async function itemEstimate(target){
    signal?.throwIfAborted();if(belowFloor(target))return skipped(target);const missing=rules.filter(rule=>!Number.isFinite(V.ruleValue(target,rule)));
-   if(missing.length){return {target,count:0,error:'缺少实际属性：'+missing.map(rule=>rule.label).join('、')};}
-   if(!target.carriedTarget&&String(target.serverId)!==context.buyerServer&&!(target.valuationMeta?.crossFeeCents>0)){return {target,count:0,error:'异服商品未查到跨服费，按当前区服年限规则不估价'};}
+   if(missing.length){return {target,gemWarning:V.mixedGemWarning(target),count:0,error:'缺少实际属性：'+missing.map(rule=>rule.label).join('、')};}
+   if(!target.carriedTarget&&String(target.serverId)!==context.buyerServer&&!(target.valuationMeta?.crossFeeCents>0)){return {target,gemWarning:V.mixedGemWarning(target),count:0,error:'异服商品未查到跨服费，按当前区服年限规则不估价'};}
    try{const priced=await gem(context,target),match=V.estimateComparables(target,[...prepared.values()].filter(sample=>context.sampleUsable(target,sample)),rules,priced.quotes,config,now());
-    return {target,samplingMode:context.localTargets.has(target.id)?'ranked':'full',count:match.count,exactCount:match.exactCount,availableCount:match.availableCount,rough:match.rough,degraded:match.degraded,ignoredEffects:match.ignoredEffects,strategy:match.strategy,supportBasis:match.supportBasis,anchorListingDays:match.anchorListingDays,supportedPriceCents:match.supportedPriceCents,supportCount:match.supportCount,requiredSupportCount:match.requiredSupportCount,lowestPriceCents:match.lowestPriceCents,isolatedLowCents:match.isolatedLowCents,...V.suggestedPrice(target,match.estimateCents,now()),references:match.references.map(row=>({...row,sample:{...row.sample,taskId:task.id,referenceLabel:'估价依据'}})),targetQuotes:priced.quotes,traits:V.importantTraits(target),attributeFocus:V.attributeFocus(target),refreshEligible:refreshIds.has(target.id),error:match.count?match.error:entry&&!entry.complete?'全服采样尚未完成，当前未取得匹配样本：'+(entry.error||'采样中'):'没有找到属性相近且折算资料完整的商品'};
-   }catch(error){if(error.valuationFatal||security(error)||signal?.aborted)throw error;return {target,count:0,error:error.message,refreshEligible:refreshIds.has(target.id)};}
+    return {target,gemWarning:V.mixedGemWarning(target),missingCrossFeeCount:match.references.filter(r=>r.sample.missingCrossFee).length,samplingMode:context.localTargets.has(target.id)?'ranked':'full',count:match.count,exactCount:match.exactCount,availableCount:match.availableCount,rough:match.rough||match.references.some(r=>r.sample.missingCrossFee),degraded:match.degraded,ignoredEffects:match.ignoredEffects,strategy:match.strategy,supportBasis:match.supportBasis,anchorListingDays:match.anchorListingDays,supportedPriceCents:match.supportedPriceCents,supportCount:match.supportCount,requiredSupportCount:match.requiredSupportCount,lowestPriceCents:match.lowestPriceCents,isolatedLowCents:match.isolatedLowCents,...V.suggestedPrice(target,match.estimateCents,now()),references:match.references.map(row=>({...row,sample:{...row.sample,taskId:task.id,referenceLabel:'估价依据'}})),physicalPowerTotal:V.physicalTotal(target,rules),targetQuotes:priced.quotes,traits:V.importantTraits(target),attributeFocus:V.attributeFocus(target),refreshEligible:refreshIds.has(target.id),error:match.count?match.error:entry&&!entry.complete?'全服采样尚未完成，当前未取得匹配样本：'+(entry.error||'采样中'):'没有找到属性相近且折算资料完整的商品'};
+   }catch(error){if(error.valuationFatal||security(error)||signal?.aborted)throw error;return {target,gemWarning:V.mixedGemWarning(target),count:0,error:error.message,refreshEligible:refreshIds.has(target.id)};}
   }
   context.publish=onProgress?async(sample)=>{
    for(const target of eligible){
@@ -228,12 +235,13 @@ function createEstimator({roles,gate,officialFetch,isCaptcha,isExpired,cacheDire
    const targets=cached&&input.refreshToken!==undefined?refreshTargets:eligible,work=(async()=>{
     const next=cached?{...entry,rows:[...entry.rows],coverage:[...entry.coverage],targetIds:[...entry.targetIds],parameterKeys:[...(entry.parameterKeys||[])],pages:{...(entry.pages||{})}}:{at:now(),rows:[],coverage:[],targetIds:[],parameterKeys:[],pages:{},error:'',complete:false};
     next.refreshToken=crypto.randomUUID();next.updatedAt=now();next.seenTargetIds=[...new Set([...(next.seenTargetIds||next.targetIds),...targets.map(target=>target.id)])];const commitCoverage=()=>{next.coverage.push(...V.planRanges(targets,rules).map(({traits,bounds,repairMax})=>({traits,bounds,repairMax})));next.targetIds=[...new Set([...next.targetIds,...targets.map(target=>target.id)])];next.parameterKeys=[...new Set([...next.parameterKeys,...targets.map(target=>V.parameterKey(target,rules))])];};next.complete=false;next.retryable=false;next.error='';fullCache.set(key,next);await save();
-    try{await collect(context,next,prepared,attempted,targets,filters,rules);await fallbackSamples(context,next,prepared,attempted,targets,filters,rules,true);next.complete=true;commitCoverage();}catch(error){next.error=error.message;next.budgetExhausted=/本组采样请求较多/.test(error.message);next.retryable=!!(security(error)||error.valuationFatal&&!/本组采样请求较多/.test(error.message)||signal?.aborted);throw error;}finally{await save();}return next;
+    try{await collect(context,next,prepared,attempted,targets,filters,rules);await supplementMissingFees(next,prepared,attempted,targets);await fallbackSamples(context,next,prepared,attempted,targets,filters,rules,true);next.complete=true;commitCoverage();}catch(error){next.error=error.message;next.budgetExhausted=/本组采样请求较多/.test(error.message);next.retryable=!!(security(error)||error.valuationFatal&&!/本组采样请求较多/.test(error.message)||signal?.aborted);throw error;}finally{await save();}return next;
    })();pending.set(key,work);void work.finally(()=>pending.delete(key)).catch(()=>{});
    try{entry=await work;}catch(error){if(signal?.aborted||security(error)||error.valuationFatal&&!/本组采样请求较多/.test(error.message))throw error;entry=fullCache.get(key);}
   }
   if(!entry.complete)warnings.push('全服采样未完成，未满 5 件的商品仅给出粗略估算：'+(entry.error||'采样中断'));
   await prepareRows(context,entry,prepared,attempted,eligible,rules);
+  await supplementMissingFees(entry,prepared,attempted,eligible);
   await fallbackSamples(context,entry,prepared,attempted,eligible,filters,rules);
   for(const target of uncovered())refreshIds.add(target.id);const items=[];
   for(const target of seeds){const row=await itemEstimate(target);items.push(row);if(onProgress)await onProgress({version:V.COMPARISON_VERSION,group,at:now(),sampledAt:entry.at,scope:'full',partial:true,complete:false,rules,items:[row],warnings:[]});}
@@ -241,7 +249,7 @@ function createEstimator({roles,gate,officialFetch,isCaptcha,isExpired,cacheDire
   return {version:V.COMPARISON_VERSION,group,at:now(),sampledAt:entry.at,updatedAt:entry.updatedAt,nextFullAt:entry.at+THREE_HOURS,cached,scope:'full',expanded:true,complete:entry.complete===true,ageMethod:'cross-fee',count:prepared.size,rules,coverage:entry.coverage,refreshEligible:refreshIds.size>0,...(refreshIds.size?{refreshToken:entry.refreshToken}:{}),items,warnings,logs:context.logs};
  }
  async function marketPage(task,params,{signal,onRequest}={}){return data({task,signal,onRequest,requests:0,logs:[],stage:'灵饰全服采样'},params);}
- async function materialQuote(roleId,id,grade,{signal,onRequest,priority=0}={}){const role=await roles.get(roleId),serverId=String(role.server.id),material=V.MATERIALS.find(m=>m.id===id);if(!material)throw Error('材料类型无效');if(preloading&&!priority)await preloading;const context={priority,task:{id:'material-for-valuation',roleId,category:'灵饰',...(priority?{requestPriority:'interactive'}:{})},buyerServer:serverId,serverName:role.server.name,signal,onRequest,requests:0,logs:[],stage:'材料报价'};const entry=await ensureMaterials(context,serverId,priority?id:null);const q=V.resolveMaterialPrice(material,grade,{...entry,custom:customFor(serverId)});if(!q)throw Error('缺少'+grade+'级'+material.name+'报价');return q;}
+ async function materialQuote(roleId,id,grade,{signal,onRequest,priority=0}={}){const role=await roles.get(roleId),serverId=String(role.server.id),material=V.MATERIALS.find(m=>m.id===id);if(!material)throw Error('材料类型无效');if(preloading&&!priority)await preloading;const context={priority,task:{id:'material-for-valuation',roleId,category:'灵饰',...(priority?{requestPriority:'interactive'}:{})},buyerServer:serverId,serverName:role.server.name,signal,onRequest,requests:0,logs:[],stage:'材料报价'};const entry=await ensureMaterials(context,serverId,priority?id:null);let q=V.resolveMaterialPrice(material,grade,{...entry,custom:customFor(serverId)});if((!q||q.source==='group')&&priority&&material.family==='clock'){for(const peer of V.clockPricePeers(material))await ensureMaterials(context,serverId,peer.id);q=V.resolveMaterialPrice(material,grade,{...entry,custom:customFor(serverId)});}if(!q)throw Error('缺少'+grade+'级'+material.name+'报价');return q;}
  return {estimate,marketPage,materialQuote,preloadMaterials,setCustomPrice,materialSnapshot,flush:()=>Promise.all([saveQueue,materialSaveQueue,customQueue])};
 }
 module.exports={createEstimator,THREE_HOURS,slim};

@@ -16,7 +16,7 @@
  const KINDS={'10':'6','11':'14','12':'15','13':'9','14':'5','15':'10','16':'4','17':'12','18':'11','19':'8','20':'13','21':'7','22':'54','23':'52','24':'53','25':'17','26':'18','27':'19','28':'21','29':'20','55':'58','56':'59'};
  function item(detail,identity,{taskId,config={},serverName=''}={}){
   if(!['装备','角色','灵饰','上古玉魄'].includes(detail.category))throw Error('目前仅支持装备、灵饰、上古玉魄和角色估价');
-  const raw={...(detail.listing||{}),eid:identity.eid,serverid:identity.serverId,equip_name:detail.name,equip_level:detail.level,price:Math.round(Number(detail.price)*100),server_name:detail.listing?.server_name||serverName,onsale_expire_time_desc:detail.market?.remaining||detail.listing?.onsale_expire_time_desc,large_equip_desc:detail.styledDescription};
+  const raw={...(detail.listing||{}),accept_bargain:detail.market?.acceptBargain??detail.listing?.accept_bargain,eid:identity.eid,serverid:identity.serverId,equip_name:detail.name,equip_level:detail.level,price:Math.round(Number(detail.price)*100),server_name:detail.listing?.server_name||serverName,onsale_expire_time_desc:detail.market?.remaining||detail.listing?.onsale_expire_time_desc,large_equip_desc:detail.styledDescription};
   if(!Number.isFinite(raw.price)||raw.price<=0)throw Error('商品详情缺少有效挂牌价格，无法估价');
   if(['灵饰','上古玉魄','召唤兽装备'].includes(detail.category))return R.normalize(raw,{config,category:detail.category,taskId});
   if(detail.category==='角色'){
@@ -30,11 +30,13 @@
   const gems=Object.entries(V.GEM_TYPES).filter(([,v])=>(source.match(/镶嵌宝石[：:]?\s*([^\n]+)/)?.[1]||'').includes(v.name)).map(([id])=>id);
   const grade=Number(source.match(/锻炼等级\s*(\d+)/)?.[1]||raw.gem_level||0);
   if(raw.gem_value==null)raw.gem_value=gems;if(raw.gem_level==null)raw.gem_level=grade;
-  const gemIds=R.tokens(raw.gem_value),bonus=(id,n)=>gemIds.includes(id)?gemIds.length>1?NaN:grade*n:0;
+  const gemIds=R.tokens(raw.gem_value),totals=Object.fromEntries(base.map(r=>[r.label,r.total]));
   const set=(key,v)=>{if(raw[key]==null&&Number.isFinite(v))raw[key]=Number(v.toFixed(3));};
-  set('shanghai',stat('伤害'));set('mingzhong',stat('命中'));set('defense',stat('防御'));set('lingli',stat('灵力'));set('qixue',stat('气血'));set('speed',stat('敏捷'));
-  set('init_damage_raw',stat('伤害')-bonus('2',8));set('all_damage',Math.floor(stat('伤害')+stat('命中')/3));set('init_damage',Math.floor(stat('伤害')-bonus('2',8)+(stat('命中')-bonus('1',25))/3));
-  set('init_wakan',stat('灵力')-bonus('3',6));set('init_defense',stat('防御')-bonus('5',12));set('init_hp',stat('气血')-bonus('4',40));set('init_dex',stat('敏捷'));
+  set('shanghai',stat('伤害'));set('mingzhong',stat('命中'));set('defense',stat('防御'));set('lingli',stat('灵力'));set('qixue',stat('气血'));set('speed',stat('速度'));
+  const fields={initialDamageExcludingHit:'init_damage_raw',initialDamageIncludingHit:'init_damage',initialSpirit:'init_wakan',initialDefense:'init_defense',initialHp:'init_hp',initialAgility:'init_dex'};
+  const initials=Object.fromEntries(Object.entries(fields).filter(([,field])=>raw[field]!=null&&Number.isFinite(Number(raw[field]))).map(([key,field])=>[key,Number(raw[field])]));
+  const restored=V.restoreInitialMetrics({gemIds,grade,kindId:raw.kindid,totals,initials});for(const [key,field] of Object.entries(fields))set(field,restored[key]);
+  set('all_damage',Math.floor(stat('伤害')+stat('命中')/3));
   raw.agg_added_attrs=base.filter(r=>['力量','魔力','敏捷','体质','耐力'].includes(r.label)).map(r=>r.label+' '+(r.total>=0?'+':'')+r.total);
   if(!raw.icon&&id)raw.icon=id+'.gif';
   const result=R.normalize(raw,{config,category:'装备',taskId});

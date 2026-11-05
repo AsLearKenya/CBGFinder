@@ -82,6 +82,30 @@ function schedulerChanged(){
  render();
 }
 function toast(message){const el=document.querySelector('#toast');el.textContent=message;el.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.classList.remove('show'),3200)}
+const valuationNoticeQueue=[];
+let valuationNoticeTimer=null;
+function valuationFinishedNotice(task,message){
+ if(!state.tasks.some(t=>t.id===task.id))return;
+ valuationNoticeQueue.push({taskId:task.id,name:task.name,message});
+ if(valuationNoticeQueue.length===1)showValuationNotice();
+ else renderValuationNotice();
+}
+function renderValuationNotice(){
+ const el=document.querySelector('#valuation-notice'),current=valuationNoticeQueue[0];
+ el.hidden=!current;if(!current){el.innerHTML='';return;}
+ el.innerHTML=`<div class="valuation-notice-copy"><strong>${esc(current.name)}</strong><span>${esc(current.message)}</span>${valuationNoticeQueue.length>1?`<small>还有 ${valuationNoticeQueue.length-1} 条完成提示</small>`:''}</div><button type="button" data-valuation-notice-open>查看任务</button><button type="button" data-valuation-notice-close aria-label="关闭当前提示">×</button>`;
+}
+function resumeValuationNotice(){clearTimeout(valuationNoticeTimer);if(valuationNoticeQueue.length)valuationNoticeTimer=setTimeout(nextValuationNotice,10000);}
+function showValuationNotice(){renderValuationNotice();resumeValuationNotice();}
+function nextValuationNotice(){clearTimeout(valuationNoticeTimer);valuationNoticeQueue.shift();showValuationNotice();}
+function openValuationNoticeTask(){const current=valuationNoticeQueue[0];if(current)openNotificationTask(current.taskId);nextValuationNotice();}
+document.addEventListener('click',event=>{if(event.target.closest('[data-valuation-notice-open]'))openValuationNoticeTask();else if(event.target.closest('[data-valuation-notice-close]'))nextValuationNotice();});
+const valuationNoticeElement=document.querySelector('#valuation-notice');
+valuationNoticeElement.addEventListener('mouseenter',()=>clearTimeout(valuationNoticeTimer));
+valuationNoticeElement.addEventListener('mouseleave',resumeValuationNotice);
+valuationNoticeElement.addEventListener('focusin',()=>clearTimeout(valuationNoticeTimer));
+valuationNoticeElement.addEventListener('focusout',event=>{if(!valuationNoticeElement.contains(event.relatedTarget))resumeValuationNotice();});
+
 const taskScheduler=TaskScheduler.create({getTasks:()=>state.tasks,execute:runEquipmentOnce,isBlocked:task=>taskNeedsVerification(task)||taskNeedsAccountSecurity(task),onChange:schedulerChanged,onError:error=>toast(error.message),onSkip:(id,source)=>{const task=state.tasks.find(t=>t.id===id);if(!task)return;state.logs.unshift({id:uid(),taskId:id,roleId:task.roleId,name:task.name,source,at:Date.now(),count:0,status:'skipped',message:'上一次搜索尚未完成，已跳过本次搜索'});render();}});
 async function runTask(id){await taskScheduler.run(id)}
 function taskCountdown(task){

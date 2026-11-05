@@ -89,7 +89,7 @@
   if(raw.is_split_independent_equip===true)traits.push('拆售装备');
   if(raw.is_time_lock===true)traits.push('时间锁'+(has(raw.time_lock_days)?' '+raw.time_lock_days+'天':''));
   if(raw.appointed_roleid)traits.push('指定交易');
-  if(raw.accept_bargain===true||raw.accept_bargain===1)traits.push('可还价');
+  if(raw.accept_bargain===true||['1','true'].includes(String(raw.accept_bargain)))traits.push('可还价');
   const sellingStatus=text(raw.equip_status_desc||raw.status_desc),fairShow=raw.pass_fair_show===false||String(raw.pass_fair_show)==='0';
   const id=String(raw.eid||raw.game_ordersn||raw.equipid||raw.equip_sn||'');
   const server=String(raw.serverid||raw.server_id||serverId||'');

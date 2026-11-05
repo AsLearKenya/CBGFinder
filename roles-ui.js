@@ -136,12 +136,12 @@ function taskVerificationNotice(task){
  if(taskNeedsAccountSecurity(task)){
   const role=availableRoles.find(role=>role.id===task.roleId),message=role?.requestQueue?.blocked||state.tasks.find(peer=>peer.roleId===task.roleId&&/MIBAO_AUTH|OTP_AUTH/.test(peer.lastError||''))?.lastError||'';
   const pending=verificationChecks.has(task.roleId)||roleOperations.has(task.roleId);
-  return `<div class="task-verification" role="alert"><div><strong>需要处理账号安全状态</strong><p>${esc(message)}</p><p>${window.desktopVerification?'在官方窗口中输入将军令，完成后点击“已完成验证，尝试请求”。':'官网浏览器与本地会话独立；桌面版支持在同一会话内验证。'}</p></div><div class="task-verification-actions">${window.desktopVerification?`<button type="button" class="button primary" data-manual-verify-task="${esc(task.id)}" ${pending?'disabled':''}>在当前会话中验证</button>`:`<button type="button" class="button primary" data-refresh-verification="${esc(task.id)}" ${pending?'disabled':''}>${roleOperations.has(task.roleId)?'正在刷新…':'刷新会话并重试'}</button>`}<button type="button" class="button secondary" data-check-verification="${esc(task.id)}" ${pending?'disabled':''}>尝试请求</button></div></div>`;
+  return `<div class="task-verification" role="alert"><div><strong>需要处理账号安全状态</strong><p>${esc(message)}</p><p>${window.desktopVerification?'在官方窗口中输入将军令，完成后点击“验证完成”。':'官网浏览器与本地会话独立；桌面版支持在同一会话内验证。'}</p></div><div class="task-verification-actions">${window.desktopVerification?`<button type="button" class="button primary" data-manual-verify-task="${esc(task.id)}" ${pending?'disabled':''}>在当前会话中验证</button>`:`<button type="button" class="button primary" data-refresh-verification="${esc(task.id)}" ${pending?'disabled':''}>${roleOperations.has(task.roleId)?'正在刷新…':'刷新会话并重试'}</button>`}<button type="button" class="button secondary" data-check-verification="${esc(task.id)}" ${pending?'disabled':''}>尝试请求</button></div></div>`;
  }
 
  if(!taskNeedsVerification(task))return '';
  const checking=verificationChecks.has(task.roleId);const pending=checking||roleOperations.has(task.roleId)||state.tasks.some(peer=>peer.roleId===task.roleId&&taskScheduler.isRunning(peer.id));
- return `<div class="task-verification" role="alert"><div><strong>${checking?'正在检查实际请求':'上次搜索需要验证'}</strong><p>${checking?'正在请求一页确认是否仍需验证。':'可先尝试请求；只有官网仍要求验证码时，才需要手动验证。'}</p></div><div class="task-verification-actions"><button type="button" class="button secondary" data-check-verification="${esc(task.id)}" ${pending?'disabled':''}>${checking?'检查中…':'尝试请求'}</button><button type="button" class="button primary" data-manual-verify-task="${esc(task.id)}" ${pending?'disabled':''}>${roleOperations.has(task.roleId)?'验证中…':'在本地完成验证'}</button><a class="button secondary" href="${esc(taskVerificationUrl(task))}" target="_blank" rel="noopener noreferrer">打开官网搜索</a></div></div>`;
+ return `<div class="task-verification" role="alert"><div><strong>${checking?'正在检查实际请求':'上次搜索需要验证'}</strong><p>${checking?'正在请求一页确认是否仍需验证。':'建议先使用手机藏宝阁登录对应账号完成验证，再点击“验证完成”检查当前会话。'}</p></div><div class="task-verification-actions"><button type="button" class="button secondary" data-check-verification="${esc(task.id)}" ${pending?'disabled':''}>${checking?'检查中…':'验证完成'}</button><button type="button" class="button primary" data-manual-verify-task="${esc(task.id)}" ${pending?'disabled':''}>${roleOperations.has(task.roleId)?'验证中…':'打开验证窗口'}</button></div></div>`;
 }
 // A successfully loaded detail confirms that this role can currently read the official site.
 function clearVerificationAfterDetail(roleId){
@@ -172,8 +172,15 @@ async function openManualVerification(taskId,roleId){
   if(popup.closed){await roleApi('verification/cancel',{id:flow.id});roleOperations.delete(roleId);return;}
   manualVerification={id:flow.id,nonce:flow.id,roleId,taskId,widgetUrl:flow.widgetUrl,popup,busy:false};
   popup.location.href=flow.widgetUrl;
-  openModal(`<div class="modal-head"><h2 id="dialog-title">完成官方安全验证</h2><button type="button" class="icon-button" data-action="close" aria-label="关闭验证">${icon('close')}</button></div><div class="human-verification-body"><p>验证已在独立窗口打开，请在该窗口亲自完成网易官方验证。通过后继续使用当前会话，同账号所有已开启任务会立即搜索一次。</p><p id="human-verification-status" role="status">正在加载独立验证窗口…</p><button type="button" class="button secondary" data-action="open-verification-window">重新打开验证窗口</button><div class="modal-actions"><button type="button" class="button secondary" data-action="close">取消验证</button></div></div>`,'human-verification-modal');
+  openModal(`<div class="modal-head"><h2 id="dialog-title">完成官方安全验证</h2><button type="button" class="icon-button" data-action="close" aria-label="关闭验证">${icon('close')}</button></div><div class="human-verification-body"><p>验证已在独立窗口打开，请在该窗口亲自完成网易官方验证。通过后继续使用当前会话，同账号所有已开启任务会立即搜索一次。</p><p id="human-verification-status" role="status">正在加载独立验证窗口…</p><p>建议先使用手机藏宝阁登录对应账号完成验证，再点击“验证完成”检查当前会话。</p><div class="modal-actions"><button type="button" class="button secondary" data-action="open-verification-window">打开验证窗口</button><button type="button" class="button primary" data-action="finish-manual-verification">验证完成</button></div></div>`,'human-verification-modal');
  }catch(error){popup.close();roleOperations.delete(roleId);toast(error.message);}
+}
+async function finishManualVerification(){
+ const flow=manualVerification;if(!flow||flow.busy)return;const task=state.tasks.find(t=>t.id===flow.taskId)||state.tasks.find(t=>t.roleId===flow.roleId);
+ if(!task){toast('请在验证窗口完成验证后，通过任务请求检查');return;}
+ flow.busy=true;const status=document.querySelector('#human-verification-status');status.textContent='正在检查验证状态…';
+ try{await roleApi('verification/cancel',{id:flow.id});flow.popup?.close();clearTimeout(flow.loadTimer);manualVerification=null;roleOperations.delete(flow.roleId);verificationCheckResults.delete(flow.roleId);const result=await checkTaskVerification(task,{quiet:true});closeModal();if(result.available)await resumeVerifiedRoleTasks(flow.roleId);else toast(result.message||'仍需验证，请重新打开验证窗口');
+ }catch(error){status.textContent=error.message;}finally{flow.busy=false;}
 }
 function cancelManualVerification(){
  if(desktopVerificationFlow){void finishDesktopVerification();return false;}
@@ -204,7 +211,7 @@ async function handleManualVerificationMessage(event){
  finally{flow.busy=false;}
 }
 window.addEventListener('message',event=>{void handleManualVerificationMessage(event);});
-document.addEventListener('click',event=>{const button=event.target.closest('button');if(button?.dataset.action==='open-verification-window'&&manualVerification){if(manualVerification.popup&&!manualVerification.popup.closed)manualVerification.popup.focus();else manualVerification.popup=window.open(manualVerification.widgetUrl,'cbg-human-verification','width=440,height=560');if(!manualVerification.popup)toast('浏览器阻止了验证窗口，请允许本地应用打开弹窗');}if(button?.dataset.manualVerifyTask)void openManualVerification(button.dataset.manualVerifyTask);if(button?.dataset.manualVerifyRole)void openManualVerification(null,button.dataset.manualVerifyRole);});
+document.addEventListener('click',event=>{const button=event.target.closest('button');if(button?.dataset.action==='finish-manual-verification')void finishManualVerification();if(button?.dataset.action==='open-verification-window'&&manualVerification){if(manualVerification.popup&&!manualVerification.popup.closed)manualVerification.popup.focus();else manualVerification.popup=window.open(manualVerification.widgetUrl,'cbg-human-verification','width=440,height=560');if(!manualVerification.popup)toast('浏览器阻止了验证窗口，请允许本地应用打开弹窗');}if(button?.dataset.manualVerifyTask)void openManualVerification(button.dataset.manualVerifyTask);if(button?.dataset.manualVerifyRole)void openManualVerification(null,button.dataset.manualVerifyRole);});
 
 document.addEventListener('click',event=>{const id=event.target.closest('button')?.dataset.checkVerification;if(!id)return;const task=state.tasks.find(task=>task.id===id);if(task)void checkTaskVerification(task).then(result=>{if(result.available)void resumeVerifiedRoleTasks(task.roleId);});});
 
@@ -222,7 +229,7 @@ document.addEventListener('click',event=>{const id=event.target.closest('button'
 
 let desktopVerificationFlow=null;
 function desktopVerificationStatus(page){
- if(page?.state==='error')return '官网验证页加载失败'+(page.code?'（'+page.code+'）':'')+'，尚未进入验证。可重试验证页，或打开官方搜索页，点击官网搜索触发验证；若仍报错，可在同一窗口打开官网登录入口，完成官网要求的登录及验证后同步会话。';
+ if(page?.state==='error')return '官网验证页加载失败'+(page.code?'（'+page.code+'）':'')+'，尚未进入验证。建议先用手机藏宝阁登录对应账号完成验证，再打开验证窗口重试。';
  if(page?.state==='login')return '官网提示登录已过期，请在此窗口中重新登录后，再尝试原任务请求。';
  return '';
 }
@@ -239,7 +246,7 @@ async function openDesktopVerification(taskId,roleId){
   const account=task?taskNeedsAccountSecurity(task):/MIBAO_AUTH|OTP_AUTH/.test(availableRoles.find(role=>role.id===roleId)?.requestQueue?.blocked||'');
   const opened=await window.desktopVerification.open({roleId,kind:account?'account':'captcha',url:task?taskVerificationUrl(task):undefined});
   desktopVerificationFlow={roleId,taskId:task?.id,busy:false};availableRoles=availableRoles.map(role=>role.id===roleId?{...role,requestQueue:{...role.requestQueue,blocked:'官方验证窗口已打开，等待手动验证'}}:role);render();
-  openModal(`<div class="modal-head"><h2 id="dialog-title">在当前角色会话中完成验证</h2><button class="icon-button" data-action="close" aria-label="关闭">${icon('close')}</button></div><p>已在独立窗口打开官方页面，沿用此角色的任务会话。请在窗口内完成将军令或滑块验证；如先显示搜索页，请点击官方搜索触发验证。</p><p>完成后点击下方按钮，确认请求恢复后，同账号所有已开启任务会立即搜索一次。</p><p id="desktop-verification-status" role="status">${esc(desktopVerificationStatus(opened?.page))}</p><div class="modal-actions"><button class="button secondary" data-action="focus-official-verification">显示验证窗口</button><button class="button secondary" data-action="retry-official-verification">重试验证页</button><button class="button secondary" data-action="search-official-verification">打开官方搜索页</button><button class="button secondary" data-action="login-official-verification">官网登录入口</button><button class="button primary" data-action="finish-official-verification">同步会话，尝试请求</button></div>`,'human-verification-modal');
+  openModal(`<div class="modal-head"><h2 id="dialog-title">在当前角色会话中完成验证</h2><button class="icon-button" data-action="close" aria-label="关闭">${icon('close')}</button></div><p>已在独立窗口打开官方页面，沿用此角色的任务会话。请在窗口内完成将军令或滑块验证；如先显示搜索页，请点击官方搜索触发验证。</p><p>建议先使用手机藏宝阁登录对应账号完成验证，再点击“验证完成”检查当前会话。请求恢复后，同账号所有已开启任务会立即搜索一次。</p><p id="desktop-verification-status" role="status">${esc(desktopVerificationStatus(opened?.page))}</p><div class="modal-actions"><button class="button secondary" data-action="focus-official-verification">打开验证窗口</button><button class="button primary" data-action="finish-official-verification">验证完成</button></div>`,'human-verification-modal');
  }catch(error){roleOperations.delete(roleId);toast(error.message);render();}
 }
 async function finishDesktopVerification({closed=false,error=''}={}){

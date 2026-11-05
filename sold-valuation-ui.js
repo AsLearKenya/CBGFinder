@@ -2,7 +2,7 @@ function soldSamplesForTask(task,target){
  if(typeof taskChangeStore==='undefined')return [];
  const ids=new Set([task.parentTaskId||task.id,...state.tasks.filter(t=>t.category===task.category).map(t=>t.id)]),rows=[];
  const buyer=typeof availableRoles==='undefined'?null:availableRoles.find(r=>r.id===task.roleId)?.server?.id;
- for(const id of ids)for(const row of taskChangeStore.peek(id).soldHistory||[]){const item=row.item;if(target&&item.kind!==target.kind)continue;if(buyer&&String(item.serverId)!==String(buyer)&&!(item.valuationMeta?.crossFeeCents>0))continue;rows.push(row);}
+ for(const id of ids)for(const row of taskChangeStore.peek(id).soldHistory||[]){const item=row.item;if(row.priceCents===20000&&(!buyer||String(item.serverId)!==String(buyer)))continue;if(target&&item.kind!==target.kind)continue;if(buyer&&String(item.serverId)!==String(buyer)&&!(item.valuationMeta?.crossFeeCents>0))continue;rows.push(row);}
  return rows;
 }
 function withSoldValuation(task,row){return typeof SoldValuation==='object'?SoldValuation.apply(row,task,soldSamplesForTask(task,row?.target)):row;}
