@@ -99,7 +99,7 @@
  function estimate(target,samples,quotes,settings,now=Date.now()){
   const error=reason(target);if(error)return {target,count:0,estimateCents:null,skipped:true,error};const dust=dustCents(target.yupoMeta.grade,quotes,settings),found=new Map();
   for(const p of plans(target))for(const sample of samples){const c=match(target,sample,p);if(c&&!found.has(sample.id))found.set(sample.id,{sample,comparison:c,converted:convert(target,sample,dust,settings),ignoredLabels:rows(target).filter((_,i)=>!p.kept.includes(i)).map(r=>r.label),matchGroup:p.group});}
-  const selected=B.supportedPrices([...found.values()],{now,targetPriceCents:B.targetAskingCents(target)}),pricing=B.suggestedPrice(target,selected.estimateCents,now);return {target,...selected,...pricing,rough:selected.rough||selected.count<B.sampleRequirement(target),targetQuotes:{},dustQuotes:quotes,dustCents:dust,attributeFocus:null};
+  const selected=B.supportedPrices([...found.values()],{now,targetPriceCents:B.targetAskingCents(target),sampleGoal:B.sampleRequirement(target)}),pricing=B.suggestedPrice(target,selected.estimateCents,now);return {target,...selected,...pricing,rough:selected.rough||selected.count<B.sampleRequirement(target),targetQuotes:{},dustQuotes:quotes,dustCents:dust,attributeFocus:null};
  }
  function queries(item){
   const out=[],r=rows(item);

@@ -12,7 +12,11 @@
   const found=new Map();for(const entry of history){if(entry.status!=='sold'||!Number.isSafeInteger(entry.priceCents)||entry.priceCents<=0||entry.priceCents*5<row.estimateCents*4||!Number.isFinite(entry.confirmedAt))continue;const comparison=comparisons(row.target,entry.item,task);if(comparison){const key=JSON.stringify([String(entry.item.serverId||''),entry.item.detailEid||entry.item.id]);if(!found.has(key))found.set(key,{...entry,comparison});}}
   const matches=[...found.values()].sort((a,b)=>a.priceCents-b.priceCents);if(!matches.length)return row;
   const calculated=row.estimateCents,price=matches[0].priceCents;
-  return {...row,precise:true,calculatedRough:row.rough,rough:false,calculatedEstimateCents:calculated,soldReferenceCents:price,soldMatchCount:matches.length,soldEvidence:matches.slice(0,5),estimateCents:Math.round(Math.min(calculated,price)*.95)};
+  // The ordinary estimate already includes its 95% discount and listing-age cap.
+  // Discount only the independent sold-price basis, then select the lower result.
+  const soldEstimate=Math.round(price*.95);
+  if(soldEstimate>calculated)return row;
+  return {...row,precise:true,calculatedRough:row.rough,rough:false,calculatedEstimateCents:calculated,soldReferenceCents:price,soldMatchCount:matches.length,soldEvidence:matches.slice(0,5),estimateCents:soldEstimate};
  }
  return {comparisons,apply};
 });

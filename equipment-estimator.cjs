@@ -5,9 +5,10 @@ const PetValuation=require('./pet-equipment-valuation.js'),Sampling=require('./v
 const {inferredAccountSecurity}=require('./auth/account-security.cjs');
 const THREE_HOURS=3*60*60*1000;
 function stable(value){if(Array.isArray(value))return value.map(stable);if(value&&typeof value==='object')return Object.fromEntries(Object.keys(value).sort().map(k=>[k,stable(value[k])]));return value;}
-function slim(item){if(item.valuationMeta)item={...item,valuationMeta:{...item.valuationMeta,roleExclusive:V.isRoleExclusive(item),gemCounts:V.gemCountsForItem(item),holeSets:Openings.parse(item.valuationMeta,item.description||(item.traits||[]).join('\n'))}};return Object.fromEntries(['id','detailEid','orderSn','collected','serverId','server','area','name','type','kind','equipmentKindId','level','price','priceDisplay','icon','valuationMeta','attributes','added','specialSkills','specialEffects','suits','traits','carriedTarget'].filter(k=>item[k]!==undefined).map(k=>[k,item[k]]));}
+function slim(item){if(item.valuationMeta)item={...item,valuationMeta:{...item.valuationMeta,roleExclusive:V.isRoleExclusive(item),gemCounts:V.gemCountsForItem(item),holeSets:Openings.parse(item.valuationMeta,item.description||(item.traits||[]).join('\n'))}};return Object.fromEntries(['id','detailEid','orderSn','collected','serverId','server','area','name','type','kind','equipmentKindId','level','price','priceDisplay','icon','valuationMeta','attributes','added','specialSkills','specialEffects','suits','traits','carriedTarget','samplingMinimum'].filter(k=>item[k]!==undefined).map(k=>[k,item[k]]));}
 function createEstimator({roles,gate,officialFetch,isCaptcha,isExpired,cacheDirectory=null,now=Date.now}){
  const fullCache=new Map(),pending=new Map(),materialCache=new Map(),materialPending=new Map(),materialGradePending=new Map(),jingpoMarkets=new Map(),ageCache=new Map();let loading,saveQueue=Promise.resolve(),materialLoading,materialSaveQueue=Promise.resolve(),preloading=null;
+ const library=Sampling.createLibrary(cacheDirectory?path.join(cacheDirectory,'equipment-task-samples.json'):null,now);
  const file=cacheDirectory?path.join(cacheDirectory,'equipment-valuation-cache.json'):null;
  async function load(){if(!loading)loading=(async()=>{if(!file)return;let data;try{data=JSON.parse(await fs.readFile(file,'utf8'));}catch(error){if(error.code==='ENOENT')return;throw Error('全服估价缓存无法读取，请保留文件后检查，未重新发起全服采样');}if(data.version!==1||!Array.isArray(data.entries))throw Error('全服估价缓存版本无效');for(const [key,entry] of data.entries)if(entry&&Number.isFinite(entry.at)&&Array.isArray(entry.rows))fullCache.set(key,entry);})();return loading;}
  async function save(){if(!file)return;const value=JSON.stringify({version:1,entries:[...fullCache].filter(([,entry],index,entries)=>now()-entry.at<THREE_HOURS||index>=entries.length-50)});const work=async()=>{await fs.mkdir(cacheDirectory,{recursive:true});const temp=file+'.tmp-'+crypto.randomUUID();try{await fs.writeFile(temp,value,{mode:0o600});await fs.rename(temp,file);}finally{await fs.rm(temp,{force:true});}};saveQueue=saveQueue.then(work,work);return saveQueue;}
@@ -132,7 +133,7 @@ function createEstimator({roles,gate,officialFetch,isCaptcha,isExpired,cacheDire
   return {...task,servers:[],equipmentFilters:next};
  }
  async function collectScope(context,entry,prepared,attempted,targets,filters,rules,counter=null){
-  const count=counter||((target)=>hitCount(target,prepared,rules,context)),unresolved=()=>targets.filter(target=>context.scopeEligible(target)&&count(target)<V.sampleRequirement(target)),queue=V.planRanges(unresolved(),rules);
+  const count=counter||((target)=>hitCount(target,prepared,rules,context)),unresolved=()=>targets.filter(target=>context.scopeEligible(target)&&count(target)<V.sampleRequirement(target)),queue=V.planRanges(unresolved(),rules).flatMap(range=>Sampling.clusters(range.targets,context.batchSize,t=>Object.fromEntries(V.actualComparisonRules(t,rules).map(r=>[r.key,V.ruleValue(t,r)]))).map(targets=>({...range,targets})));
   const cursors=new Map(),rawRows=new Map(entry.rows.map(row=>[row.id,row]));
   while(queue.length){
    const range=queue.shift();await prepareRows(context,entry,prepared,attempted,range.targets,rules,counter);const wanted=range.targets.filter(target=>context.scopeEligible(target)&&count(target)<V.sampleRequirement(target));if(!wanted.length)continue;
@@ -142,7 +143,7 @@ function createEstimator({roles,gate,officialFetch,isCaptcha,isExpired,cacheDire
    context.stage=(context.scopeServer?context.scopeServer.name:'跨服')+'范围采样 · '+wanted.length+' 件待估商品';let narrowed=false;
    for(const plan of P.buildPlans(query)){let page=cursor.page;const seen=cursor.seen;while(page!==null){
     const params=P.pagePlan(plan,page).params,requestKey=JSON.stringify(stable(params));entry.pages??={};let pageRecord=entry.pages[requestKey];
-    if(!pageRecord){const response=await data(context,params);const ids=[];for(const raw of response.equip_list){const item=R.normalize(raw,{taskId:context.task.id,category:'装备'});if(item?.id){ids.push(item.id);if(context.scopeServer)context.localIds.add(item.id);else context.fullIds.add(item.id);if(!rawRows.has(item.id))rawRows.set(item.id,slim(item));}}const fingerprint=JSON.stringify(ids);if(response.equip_list.length&&seen.has(fingerprint))throw Error('估价采样返回重复页，已停止');pageRecord={fingerprint,count:response.equip_list.length,nextPage:P.nextPage(response,page)};entry.pages[requestKey]=pageRecord;}
+    if(!pageRecord){const response=await data(context,params);const ids=[];for(const raw of response.equip_list){const item=R.normalize(raw,{taskId:context.task.id,category:'装备'});if(item?.id){ids.push(item.id);context.library.add([slim(item)],!!context.scopeServer);if(context.scopeServer)context.localIds.add(item.id);else context.fullIds.add(item.id);rawRows.set(item.id,slim(item));}}const fingerprint=JSON.stringify(ids);if(response.equip_list.length&&seen.has(fingerprint))throw Error('估价采样返回重复页，已停止');pageRecord={fingerprint,count:response.equip_list.length,nextPage:P.nextPage(response,page)};entry.pages[requestKey]=pageRecord;}
     if(pageRecord.count&&seen.has(pageRecord.fingerprint))throw Error('估价采样返回重复页，已停止');seen.add(pageRecord.fingerprint);cursor.page=pageRecord.nextPage;
     entry.rows=[...rawRows.values()];await prepareRows(context,entry,prepared,attempted,targets,rules,counter);
     const remaining=wanted.filter(target=>context.scopeEligible(target)&&count(target)<V.sampleRequirement(target));if(!remaining.length){narrowed=true;break;}
@@ -155,7 +156,7 @@ function createEstimator({roles,gate,officialFetch,isCaptcha,isExpired,cacheDire
  }
  async function collectScopeWithPower(context,entry,prepared,attempted,targets,filters,rules,counter){
   await collectScope(context,entry,prepared,attempted,targets,filters,rules,counter);
-  const physical=targets.filter(t=>V.physicalTotal(t,rules));if(!physical.length)return;
+  const physical=targets.filter(t=>V.physicalTotal(t,rules)&&(!Number.isFinite(context.batchSize)||hitCount(t,prepared,rules,context)<V.sampleRequirement(t)));if(!physical.length)return;
   const overflowCount=target=>[...prepared.values()].filter(sample=>(V.metrics(sample)['addon:power']||0)>V.PHYSICAL_POWER_SPLIT&&context.sampleUsable(target,sample)&&context.matches(target,sample)).length;
   context.powerOverflow=true;try{await collectScope(context,entry,prepared,attempted,physical,{...filters,physicalPowerOverflow:true},rules,overflowCount);}finally{context.powerOverflow=false;}
  }
@@ -188,9 +189,12 @@ function createEstimator({roles,gate,officialFetch,isCaptcha,isExpired,cacheDire
   const task=input?.task;if(!task||task.category!=='装备'||task.valuationEnabled!==true||typeof task.roleId!=='string'||!task.roleId||typeof task.id!=='string'||!task.id)throw Error('请为装备任务开启估价');
   P.buildPlans(task);const config=V.settings(input.settings),group=input.group;if(!group||!/^\d+$/.test(String(group.kindId))||!Number.isInteger(group.level)||group.level<60||group.level>160||group.level%10!==0)throw Error('估价装备分组无效');
   if(!Array.isArray(input.seedRows)||input.seedRows.length>10000)throw Error('估价初始样本格式无效');
+  const total=Sampling.taskTotal(input),batchSize=Sampling.batchSize(total);
   const role=await roles.get(task.roleId),context={task,signal,onRequest,settings:config,requests:0,logs:[],settled:new Set(),stage:'确认跨服状态',excluded:0,exclusionReasons:new Set(),buyerServer:String(role.server.id),serverName:role.server.name||'',buyerOld:false};
-  const seeds=input.seedRows.filter(r=>String(r.equipmentKindId)===String(group.kindId)&&Number(r.level)===group.level).map(slim);
+  context.batchSize=batchSize;context.library=await library.open(task,context.buyerServer,input.seedRows.map(slim));
+  const seeds=input.seedRows.filter(r=>String(r.equipmentKindId)===String(group.kindId)&&Number(r.level)===group.level).map(r=>slim({...r,...(Number.isFinite(batchSize)?{samplingMinimum:5}:{})}));
   const belowFloor=target=>!!V.skipReason(target),skipped=target=>({target,count:0,estimateCents:null,sampleEstimateCents:null,skipped:true,error:V.skipReason(target)});
+  if(seeds.every(belowFloor))await library.flush();
   if(seeds.every(belowFloor))return {version:V.COMPARISON_VERSION,group,at:now(),scope:'full',complete:true,rules:[],items:seeds.map(skipped),warnings:[],logs:[]};
   if(task.requestPriority!=='interactive'){if(preloading)await preloading;await ensureMaterials(context,context.buyerServer);}context.stage='确认跨服状态';
   context.buyerOld=seeds.some(r=>String(r.serverId)!==context.buyerServer&&r.valuationMeta?.crossFeeCents>0);
@@ -202,10 +206,10 @@ function createEstimator({roles,gate,officialFetch,isCaptcha,isExpired,cacheDire
   if(!seeds.length)return {version:V.COMPARISON_VERSION,group,at:now(),scope:'full',items:[],warnings:['本组没有需要估价的商品'],logs:context.logs};
   const comparisons=new WeakMap();context.matches=(target,sample)=>{let matches=comparisons.get(target);if(!matches){matches=new WeakMap();comparisons.set(target,matches);}if(!matches.has(sample))matches.set(sample,V.similar(target,sample,rules));return matches.get(sample);};
 
-  await load();const key=crypto.createHash('sha256').update(JSON.stringify(stable({role:task.roleId,server:context.buyerServer,filters,samplingModes:[...new Set(eligible.map(t=>Sampling.mode(t)))].sort(),samplingVersion:Sampling.VERSION,version:V.COMPARISON_VERSION}))).digest('hex');
+  await load();const key=crypto.createHash('sha256').update(JSON.stringify(stable({role:task.roleId,server:context.buyerServer,filters,samplingModes:[...new Set(eligible.map(t=>Sampling.mode(t)))].sort(),samplingVersion:Sampling.VERSION,batchSize:Number.isFinite(batchSize)?batchSize:0,version:V.COMPARISON_VERSION}))).digest('hex');
   if(pending.has(key)){try{await pending.get(key);}catch(error){if(signal?.aborted||security(error))throw error;}}
   signal?.throwIfAborted();let entry=fullCache.get(key),cached=!!(entry&&now()-entry.at<THREE_HOURS),prepared=new Map(),attempted=new Set();
-  context.fullIds=new Set(entry?.fullIds||[]);context.localIds=new Set(entry?.localIds||[]);context.localTargets=new Set([...(entry?.localTargetIds||[]),...eligible.filter(t=>Sampling.mode(t)==='local').map(t=>t.id)]);
+  context.fullIds=new Set(entry?.fullIds||[]);context.localIds=new Set([...(entry?.localIds||[]),...context.library.localIds()]);context.localTargets=new Set([...(entry?.localTargetIds||[]),...eligible.filter(t=>Sampling.mode(t)==='local').map(t=>t.id)]);
   context.missingFeeTargets=new Set();
   context.sampleUsable=(target,sample)=>(sample.valuationMeta?.crossFeeCents>0||String(sample.serverId)===context.buyerServer||context.missingFeeTargets.has(target.id))&&Sampling.usableSample(sample,context.buyerServer)&&(Sampling.mode(target)!=='local'||context.localIds.has(sample.id));
 
@@ -232,16 +236,18 @@ function createEstimator({roles,gate,officialFetch,isCaptcha,isExpired,cacheDire
    }
   }:null;
   const uncovered=()=>eligible.filter(target=>!(entry.seenTargetIds||entry.targetIds).includes(target.id)&&hitCount(target,prepared,rules,context)<V.sampleRequirement(target)&&!(entry.parameterKeys||[]).includes(V.parameterKey(target,rules))&&(!entry.coverage.some(range=>V.rangeCovers(range,target,rules))||hitCount(target,prepared,rules,context)===0));
-  if(cached)await prepareRows(context,entry,prepared,attempted,eligible,rules);
+  const pooledRows=new Map([...(cached?entry.rows:[]),...context.library.rows()].map(r=>[r.id,r]));
+  if(cached)entry.rows=[...pooledRows.values()];
+  await prepareRows(context,{rows:[...pooledRows.values()]},prepared,attempted,eligible,rules);
   const refreshTargets=cached?uncovered():[];
   if(input.refreshToken!==undefined){
    if(!cached||typeof input.refreshToken!=='string'||input.refreshToken!==entry.refreshToken||!refreshTargets.length)throw Error('仅新商品的参数未被缓存覆盖或未命中，且样本未达到目标数量时，才可更新全服样本');
   }
   if(!cached||entry.complete!==true&&!entry.budgetExhausted||entry.retryable===true||input.refreshToken!==undefined){
    const targets=cached&&input.refreshToken!==undefined?refreshTargets:eligible,work=(async()=>{
-    const next=cached?{...entry,rows:[...entry.rows],coverage:[...entry.coverage],targetIds:[...entry.targetIds],parameterKeys:[...(entry.parameterKeys||[])],pages:{...(entry.pages||{})}}:{at:now(),rows:[],coverage:[],targetIds:[],parameterKeys:[],pages:{},error:'',complete:false};
+    const next=cached?{...entry,rows:[...entry.rows],coverage:[...entry.coverage],targetIds:[...entry.targetIds],parameterKeys:[...(entry.parameterKeys||[])],pages:{...(entry.pages||{})}}:{at:now(),rows:[...pooledRows.values()],coverage:[],targetIds:[],parameterKeys:[],pages:{},error:'',complete:false};
     next.refreshToken=crypto.randomUUID();next.updatedAt=now();next.seenTargetIds=[...new Set([...(next.seenTargetIds||next.targetIds),...targets.map(target=>target.id)])];const commitCoverage=()=>{next.coverage.push(...V.planRanges(targets,rules).map(({traits,bounds,repairMax})=>({traits,bounds,repairMax})));next.targetIds=[...new Set([...next.targetIds,...targets.map(target=>target.id)])];next.parameterKeys=[...new Set([...next.parameterKeys,...targets.map(target=>V.parameterKey(target,rules))])];};next.complete=false;next.retryable=false;next.error='';fullCache.set(key,next);await save();
-    try{await collect(context,next,prepared,attempted,targets,filters,rules);await supplementMissingFees(next,prepared,attempted,targets);await fallbackSamples(context,next,prepared,attempted,targets,filters,rules,true);next.complete=true;commitCoverage();}catch(error){next.error=error.message;next.budgetExhausted=/本组采样请求较多/.test(error.message);next.retryable=!!(security(error)||error.valuationFatal&&!/本组采样请求较多/.test(error.message)||signal?.aborted);throw error;}finally{await save();}return next;
+    try{await collect(context,next,prepared,attempted,targets,filters,rules);await supplementMissingFees(next,prepared,attempted,targets);await fallbackSamples(context,next,prepared,attempted,targets,filters,rules,true);next.complete=true;commitCoverage();}catch(error){next.error=error.message;next.budgetExhausted=/本组采样请求较多/.test(error.message);next.retryable=!!(security(error)||error.valuationFatal&&!/本组采样请求较多/.test(error.message)||signal?.aborted);throw error;}finally{await library.flush();await save();}return next;
    })();pending.set(key,work);void work.finally(()=>pending.delete(key)).catch(()=>{});
    try{entry=await work;}catch(error){if(signal?.aborted||security(error)||error.valuationFatal&&!/本组采样请求较多/.test(error.message))throw error;entry=fullCache.get(key);}
   }
@@ -252,7 +258,8 @@ function createEstimator({roles,gate,officialFetch,isCaptcha,isExpired,cacheDire
   for(const target of uncovered())refreshIds.add(target.id);const items=[];
   for(const target of seeds){const row=await itemEstimate(target);items.push(row);if(onProgress)await onProgress({version:V.COMPARISON_VERSION,group,at:now(),sampledAt:entry.at,scope:'full',partial:true,complete:false,rules,items:[row],warnings:[]});}
   if(context.excluded)warnings.push(context.excluded+' 个样本因折算资料不完整而排除：'+[...context.exclusionReasons].slice(0,3).join('；'));
-  return {version:V.COMPARISON_VERSION,group,at:now(),sampledAt:entry.at,updatedAt:entry.updatedAt,nextFullAt:entry.at+THREE_HOURS,cached,scope:'full',expanded:true,complete:entry.complete===true,ageMethod:'cross-fee',count:prepared.size,rules,coverage:entry.coverage,refreshEligible:refreshIds.size>0,...(refreshIds.size?{refreshToken:entry.refreshToken}:{}),items,warnings,logs:context.logs};
+  await library.flush();
+  return {version:V.COMPARISON_VERSION,group,taskItemCount:total,samplingBatchSize:Number.isFinite(batchSize)?batchSize:null,at:now(),sampledAt:entry.at,updatedAt:entry.updatedAt,nextFullAt:entry.at+THREE_HOURS,cached,scope:'full',expanded:true,complete:entry.complete===true,ageMethod:'cross-fee',count:prepared.size,rules,coverage:entry.coverage,refreshEligible:refreshIds.size>0,...(refreshIds.size?{refreshToken:entry.refreshToken}:{}),items,warnings,logs:context.logs};
  }
  async function marketPage(task,params,{signal,onRequest}={}){return data({task,signal,onRequest,requests:0,logs:[],stage:'灵饰全服采样'},params);}
  async function materialQuote(roleId,id,grade,{signal,onRequest,priority=0}={}){const role=await roles.get(roleId),serverId=String(role.server.id),material=V.MATERIALS.find(m=>m.id===id);if(!material)throw Error('材料类型无效');if(preloading&&!priority)await preloading;const context={priority,task:{id:'material-for-valuation',roleId,category:'灵饰',...(priority?{requestPriority:'interactive'}:{})},buyerServer:serverId,serverName:role.server.name,signal,onRequest,requests:0,logs:[],stage:'材料报价'};const entry=await ensureMaterials(context,serverId,priority?id:null);let q=V.resolveMaterialPrice(material,grade,{...entry,custom:customFor(serverId)});if((!q||q.source==='group')&&priority&&material.family==='clock'){for(const peer of V.clockPricePeers(material))await ensureMaterials(context,serverId,peer.id);q=V.resolveMaterialPrice(material,grade,{...entry,custom:customFor(serverId)});}if(!q)throw Error('缺少'+grade+'级'+material.name+'报价');return q;}

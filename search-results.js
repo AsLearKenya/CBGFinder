@@ -223,6 +223,17 @@
   const melt=description.split('熔炼效果')[1]||'';
   if(basic.size){for(const m of melt.matchAll(/([+-]\d+(?:\.\d+)?)\s*(伤害|命中|防御|灵力|气血|魔法|速度|法伤|法防)/g))if(basic.has(m[2]))basic.set(m[2],basic.get(m[2])+Number(m[1]));}
   else for(const a of item.attributes||[])if(labels.includes(a.label)&&!basic.has(a.label))basic.set(a.label,Number(a.value));
+  const shoe=String(item.equipmentKindId||'')==='19'||!item.equipmentKindId&&/鞋/.test(item.type||'');
+  if(shoe){
+   const breakdown=equipmentBreakdown(description);
+   for(const [label,metric,initial] of [['防御','initialDefense','初防'],['敏捷','initialAgility','初敏']]){
+    const parsed=breakdown.find(a=>a.label===label),official=item.valuationMeta?.metrics?.[metric]??item.attributes?.find(a=>a.label===initial)?.value??item.attributes?.find(a=>a.label===label)?.value;
+    // The detail description has base and melt separately; official initial
+    // fields already include melt and must not have it added a second time.
+    if(parsed&&parsed.base!==0)basic.set(label,parsed.total);
+    else if(official!==undefined&&official!==null&&Number.isFinite(Number(official)))basic.set(label,Number(official));
+   }
+  }
   const added=[];for(const line of item.added||[]){const pairs=[...line.matchAll(/([\u4e00-\u9fff]+)\s*([+-]?\d+(?:\.\d+)?)/g)];if(pairs.length)added.push(...pairs.filter(m=>!basic.has(m[1])).map(m=>m[1]+' '+(Number(m[2])>=0?'+':'')+Number(m[2])));else added.push(line);}
   if(!added.length)for(const a of equipmentBreakdown(description))if(!basic.has(a.label))added.push(a.label+' '+(a.total>=0?'+':'')+a.total);
   const kind=String(item.equipmentKindId||''),type=item.type||'';
