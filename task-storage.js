@@ -15,8 +15,10 @@
   const result={id:task.id,name:task.name,category:task.category,servers,interval:task.interval,enabled:task.enabled===true&&SearchParams.supportsCategory(task.category),lastRunAt:Number.isFinite(task.lastRunAt)&&task.lastRunAt>0?task.lastRunAt:null};
   if(Number.isFinite(task.lastViewedAt)&&task.lastViewedAt>0)result.lastViewedAt=task.lastViewedAt;
   if(typeof task.resultRevision==='string')result.resultRevision=task.resultRevision;
+  if(typeof task.resultRoleId==='string')result.resultRoleId=task.resultRoleId;
   if(typeof task.changeNotifications==='boolean')result.changeNotifications=task.changeNotifications;
   if(typeof task.roleId==='string')result.roleId=task.roleId;
+  if(typeof task.collectionRoleId==='string')result.collectionRoleId=task.collectionRoleId;
   if(typeof task.lastError==='string')result.lastError=task.lastError;
   if(['角色','灵饰','上古玉魄','召唤兽装备'].includes(task.category))result.valuationEnabled=task.valuationEnabled===true;
   if(task.category==='装备'){
@@ -33,6 +35,12 @@
   if(new Set(servers.map(s=>String(s.id))).size>8){result.enabled=false;result.lastError='部分区服搜索最多选择8个服务器，请编辑任务缩小范围或改为全服';}
   return result;
  }
+ function productSignature(task){
+  const saved=project(task),key=({'装备':'equipmentFilters','召唤兽':'petFilters','角色':'roleFilters','灵饰':'lingshiFilters','上古玉魄':'yupoFilters','召唤兽装备':'petEquipmentFilters'})[saved.category];
+  const filters={...(saved[key]||{})};if(filters.type!==undefined){filters.types??=[filters.type];delete filters.type;}
+  const normalize=value=>{if(value===null||value===undefined||value===''||value===false)return undefined;if(typeof value==='string'&&/^-?\d+(?:\.\d+)?$/.test(value))return Number(value);if(Array.isArray(value)){const rows=value.map(normalize).filter(v=>v!==undefined).sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b)));return rows.length?rows:undefined;}if(value&&typeof value==='object'){const entries=Object.keys(value).sort().map(k=>[k,normalize(value[k])]).filter(([,v])=>v!==undefined);return entries.length?Object.fromEntries(entries):undefined;}return value;};
+  return JSON.stringify([saved.category,saved.servers.map(s=>String(s.id)).sort(),normalize(filters)||{}]);
+ }
  function tasksCopy(tasks){
   if(!Array.isArray(tasks))throw new Error('任务存档格式无效，原存档未被修改');
   const result=tasks.map(project);
@@ -47,5 +55,5 @@
   return tasksCopy(data.tasks).map(task=>({...task,nextRunAt:task.enabled?now+task.interval*60000:null}));
  }
  function save(storage,tasks){storage.setItem(KEY,JSON.stringify({version:1,savedAt:Date.now(),tasks:tasksCopy(tasks)}));}
- return {KEY,load,save,project};
+ return {KEY,load,save,project,productSignature};
 });

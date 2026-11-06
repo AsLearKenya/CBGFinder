@@ -1,6 +1,6 @@
 (function(root,factory){const api=factory(typeof module==='object'&&module.exports?require('./equipment-attribute-focus.js'):root.EquipmentAttributeFocus,typeof module==='object'&&module.exports?require('./equipment-openings.js'):root.EquipmentOpenings,typeof module==='object'&&module.exports?require('./lingshi.js'):root.Lingshi,typeof module==='object'&&module.exports?require('./pet-equipment-valuation.js'):root.PetEquipmentValuation);if(typeof module==='object'&&module.exports)module.exports=api;else root.EquipmentValuation=api;})(typeof globalThis==='object'?globalThis:this,function(AttributeFocus,EquipmentOpenings,Lingshi,PetValuation){
  'use strict';
- const COMPARISON_VERSION=44;
+ const COMPARISON_VERSION=45;
  const STORAGE_KEY='cbg:equipment-valuation:v1';
  const GEM_TYPES=Object.freeze({'1':{name:'红玛瑙',type:'4011'},'2':{name:'太阳石',type:'4002'},'3':{name:'舍利子',type:'4012'},'4':{name:'光芒石',type:'4004'},'5':{name:'月亮石',type:'4003'},'6':{name:'黑宝石',type:'4010'},'7':{name:'神秘石',type:null},'12':{name:'翡翠石',type:'4249'},'4006':{name:'红宝石',type:null},'4007':{name:'黄宝石',type:null},'4008':{name:'蓝宝石',type:null},'4009':{name:'绿宝石',type:null}});
  const MATERIALS=Object.freeze([...Object.entries(GEM_TYPES).filter(([,gem])=>gem.type!==null).map(([gemId,gem])=>({id:gemId,...gem,family:'gem'})),{id:'starlight',name:'星辉石',type:'4244',family:'starlight'},{id:'dust',name:'五色灵尘',type:'61719',family:'dust'},...Lingshi.CLOCK_TYPES,...PetValuation.MATERIALS]);
@@ -261,7 +261,7 @@
   if(total&&additions.length){
    const finite=[total,...additions].every(r=>Number.isFinite(r.target)&&Number.isFinite(r.sample));
    const delta=total.sample-total.target;
-   const matches=finite&&additions.every(r=>!r.preferred||r.sample>=r.target-1)&&(delta>=total.unrestrictedTotalGain||delta>=total.wideMinimumDelta&&additions.every(r=>Math.abs(r.sample-r.target)<=r.alternativeTolerance)||delta>=total.minimumDelta&&additions.every(r=>Math.abs(r.sample-r.target)<=r.tolerance));
+   const matches=finite&&additions.every(r=>!r.preferred||r.sample>=r.target-1)&&(!total.ignorePower&&delta>=total.unrestrictedTotalGain||delta>=total.wideMinimumDelta&&additions.every(r=>Math.abs(r.sample-r.target)<=r.alternativeTolerance)||delta>=total.minimumDelta&&additions.every(r=>Math.abs(r.sample-r.target)<=r.tolerance));
    for(const row of [total,...additions])row.matches=matches;
   }
   return rows;

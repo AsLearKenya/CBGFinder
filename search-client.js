@@ -40,7 +40,7 @@ function ingestSearchRecord(record,task,response,run=rawSearchRun){
  record.pager=response.pager||null;record.upstreamCount=response.equip_list.length;
  record.items=response.equip_list.map((item,index)=>{
   const normalized=SearchResults.normalize(item,{config:autoSearchConfig||{},taskId:task.id,taskName:task.name,serverName:record.serverName,serverId:record.serverId,category:task.category,transformGroups:transformSuitGroups});
-  if(normalized)normalized.searchScope=record.serverId||'*';
+  if(normalized){normalized.searchScope=record.serverId||'*';normalized.collectedRoleId=task.roleId;}
   if(normalized&&!normalized.hasStableId)normalized.id=`${record.serverId}:${record.sequence??run.records.indexOf(record)}:${index}`;
   return normalized;
  }).filter(Boolean);
@@ -59,12 +59,13 @@ async function runEquipmentOnce(id,source='manual',{retryFailed=false}={}){
  }
  if(location.protocol==='file:'){toast('请先运行 npm start，再从 http://127.0.0.1:5173 打开页面搜索');return;}
  const original=state.tasks.find(task=>task.id===id);if(!original)return;
+ if(typeof availableRoles!=='undefined'&&availableRoles.some(role=>role.id===original.roleId&&role.collectionOnly)){original.enabled=false;original.nextRunAt=null;toast('仅用于收藏的角色不能执行搜索任务');renderBackground();return;}
  if(!original.roleId){original.enabled=false;original.nextRunAt=null;toast('请先为任务绑定角色');renderBackground();return;}
  const allocationError=SearchParams.roleTaskError(state.tasks,original);if(allocationError){original.enabled=false;original.nextRunAt=null;toast(allocationError);renderBackground();return false;}
  const task=JSON.parse(JSON.stringify(original));let plans;
  try{plans=SearchParams.buildPlans(task);}catch(error){state.logs.unshift({id:uid(),taskId:id,roleId:task.roleId,name:task.name,source,at:Date.now(),count:0,status:'failed',message:error.message});original.lastError=error.message;toast(error.message);renderBackground();return false;}
  const previous=state.taskRuns?.[id];
- const run={runId:uid(),startedAt:Date.now(),running:true,category:task.category,taskId:id,taskName:task.name,records:[],items:[],currentItems:[],serverSnapshots:{},serverStates:{},total:plans.length,cancelled:false};
+ const run={sourceRoleId:task.roleId,runId:uid(),startedAt:Date.now(),running:true,category:task.category,taskId:id,taskName:task.name,records:[],items:[],currentItems:[],serverSnapshots:{},serverStates:{},total:plans.length,cancelled:false};
  state.taskRuns=state.taskRuns||{};state.taskRuns[id]=run;rawSearchRun=run;
  state.results=run.items;
  const controller=new AbortController();searchControllers.set(id,controller);

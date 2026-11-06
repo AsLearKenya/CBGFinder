@@ -44,7 +44,7 @@ let editorServerKeys=new Set(),taskDraft=null,taskRoleReturn=null;
 function captureTaskDraft(){
  const form=document.querySelector('#task-form');if(!form)return;
  const data=Object.fromEntries(new FormData(form));
- taskDraft={...taskDraft,name:data.name,interval:data.interval,category:data.category,roleId:data.roleId,startImmediately:data.startImmediately==='on'};
+ taskDraft={...taskDraft,name:data.name,interval:data.interval,category:data.category,roleId:data.roleId,collectionRoleId:data.collectionRoleId||'',startImmediately:data.startImmediately==='on'};
 }
 function openServerPage(){
  if(serverPageOpen&&serverPickerContext.presentation==='dropdown'){ServerPicker.close(false);return;}
@@ -187,7 +187,7 @@ function homeView(){
 }
 function tasksView(){
  const tasks=state.tasks.filter(task=>(taskRoleFilter==='all'||task.roleId===taskRoleFilter)&&(taskFilter==='all'||(taskFilter==='active'?task.enabled:!task.enabled))&&`${task.name}${serverNames(task)}`.includes(query));
- return heading('任务列表','管理所有任务，点击任务卡片查看该任务的搜索结果。',taskActions())+`<section class="panel"><div class="panel-header"><div class="panel-title">全部搜索任务 <span class="count">${state.tasks.length}</span></div></div><div class="toolbar"><div class="segmented">${[['all','全部任务'],['active','运行中'],['paused','未启动']].map(([value,label])=>`<button class="${taskFilter===value?'active':''}" data-task-filter="${value}">${label}</button>`).join('')}</div><label class="task-role-filter">绑定角色<select data-task-role-filter aria-label="按角色筛选任务"><option value="all">全部角色</option>${availableRoles.map(role=>`<option value="${esc(role.id)}" ${taskRoleFilter===role.id?'selected':''}>${esc(roleLabel(role.id))}</option>`).join('')}</select></label><div class="search-field">${icon('search')}<input id="task-query" value="${esc(query)}" placeholder="搜索任务名称…" aria-label="搜索任务"></div></div><div id="task-list">${tasks.length?tasks.map(taskRow).join(''):state.tasks.length?empty('暂无匹配任务','请调整角色、运行状态或搜索条件。'):empty('暂无任务','先添加角色，再创建搜索任务。')}</div></section>`;
+ return heading('任务列表','管理所有任务，点击任务卡片查看该任务的搜索结果。',taskActions())+`<section class="panel"><div class="panel-header"><div class="panel-title">全部搜索任务 <span class="count">${state.tasks.length}</span></div></div><div class="toolbar"><div class="segmented">${[['all','全部任务'],['active','运行中'],['paused','未启动']].map(([value,label])=>`<button class="${taskFilter===value?'active':''}" data-task-filter="${value}">${label}</button>`).join('')}</div><label class="task-role-filter">绑定角色<select data-task-role-filter aria-label="按角色筛选任务"><option value="all">全部角色</option>${searchRoles().map(role=>`<option value="${esc(role.id)}" ${taskRoleFilter===role.id?'selected':''}>${esc(roleLabel(role.id))}</option>`).join('')}</select></label><div class="search-field">${icon('search')}<input id="task-query" value="${esc(query)}" placeholder="搜索任务名称…" aria-label="搜索任务"></div></div><div id="task-list">${tasks.length?tasks.map(taskRow).join(''):state.tasks.length?empty('暂无匹配任务','请调整角色、运行状态或搜索条件。'):empty('暂无任务','先添加角色，再创建搜索任务。')}</div></section>`;
 }
 function taskIconKind(task){
  const list=value=>value==null?[]:(Array.isArray(value)?value:[value]).map(String),unify=icons=>icons.length&&icons.every(i=>i===icons[0])?icons[0]:'equipment';
@@ -221,7 +221,7 @@ function closeModal(){if(typeof cancelManualVerification==='function'&&!cancelMa
 function taskEditor(id){
  previousFocus=document.activeElement;
  const task=state.tasks.find(t=>t.id===id);
- taskDraft=task?JSON.parse(JSON.stringify(task)):{id:'',name:'',category:'',servers:[],interval:15,startImmediately:false,roleId:availableRoles.find(role=>canBindTaskRole(role.id))?.id||''};
+ taskDraft=task?JSON.parse(JSON.stringify(task)):{id:'',name:'',category:'',servers:[],interval:15,startImmediately:false,collectionRoleId:'',roleId:availableRoles.find(role=>canBindTaskRole(role.id))?.id||''};
  editorServerKeys=new Set((taskDraft.servers||[]).map(server=>server.key));serverPageOpen=false;suitPageOpen=false;taskRoleReturn=null;
  renderTaskEditor();
 }
@@ -230,9 +230,9 @@ function renderTaskEditor(){
  if(typeof reconcileImportedServers==='function')reconcileImportedServers();
  const t=taskDraft,id=t.id;
  const selected=serverList.filter(server=>editorServerKeys.has(server.key));
- openModal(`<div class="modal-head"><h2 id="dialog-title">${id?'编辑搜索任务':'新建搜索任务'}</h2><button class="icon-button" data-action="close" aria-label="关闭">${icon('close')}</button></div><form id="task-form" data-id="${esc(id)}">${typeof taskImportReviewHtml==='function'?taskImportReviewHtml():''}<div class="task-editor-body"><aside class="task-basic-settings" aria-label="任务基本设置"><div class="form-field"><label for="name">任务名称</label><input id="name" name="name" required maxlength="40" value="${esc(t.name)}" placeholder="输入任务名称"></div><div class="form-field"><label for="interval">执行间隔（分钟）</label><input id="interval" name="interval" type="number" min="1" max="1440" step="1" required value="${esc(t.interval)}"></div><div class="form-field"><div class="task-role-label"><label for="task-role">绑定角色</label><button type="button" class="text-button" data-action="add-task-role">${icon('plus')}添加角色</button></div><select id="task-role" name="roleId" required><option value="">请选择角色</option>${availableRoles.map(role=>`<option value="${esc(role.id)}" ${t.roleId===role.id?'selected':''} ${canBindTaskRole(role.id,id)?'':'disabled'}>${esc(roleLabel(role.id))}（已绑定 ${state.tasks.filter(task=>task.roleId===role.id).length} 个任务）</option>`).join('')}</select>${!availableRoles.some(role=>canBindTaskRole(role.id,id))?'<p class="task-role-hint">暂无可绑定角色，点击“添加角色”即可继续，当前设置会保留。</p>':''}${roleLoadState==='error'?'<button type="button" class="text-button" data-action="reload-task-roles">重新加载角色</button>':''}</div><div class="form-field"><label for="choose-servers">服务器</label><button type="button" id="choose-servers" class="server-picker-button" data-action="choose-servers" aria-expanded="false" aria-controls="task-server-dropdown"><span>${selected.length?'已选择 '+selected.length+' 个服务器':'全服（不选服务器）'}</span>${icon('arrow')}</button><div class="selected-servers-summary" title="${esc(selected.map(server=>server.region+' · '+server.name).join('、'))}">${esc(selected.map(server=>server.name).join('、')||'不选择服务器时搜索全服')}</div><section id="task-server-dropdown" class="server-dropdown" popover="manual" role="region" aria-label="选择任务服务器"></section></div><div class="form-field"><label for="category">商品分类</label><select id="category" name="category" required><option value="">请选择分类</option>${['角色','召唤兽','装备','灵饰','上古玉魄','召唤兽装备'].map(value=>`<option ${value===t.category?'selected':''}>${value}</option>`).join('')}</select></div>${!id?`<label class="task-start-option"><span><strong>直接启动</strong><small>创建后立即搜索一次，之后按设定间隔执行。</small></span><input type="checkbox" name="startImmediately" role="switch" aria-label="直接启动" ${t.startImmediately?'checked':''} ${!SearchParams.supportsCategory(t.category)?'disabled':''}></label>`:''}</aside><section class="task-filter-panel" aria-label="品类筛选"><div id="category-options">${SearchParams.supportsCategory(t.category)?categoryOptions(t.category):'<div class="task-filter-empty"><strong>选择商品分类</strong><p>在左侧选择品类后，在这里设置搜索条件。</p></div>'}</div></section></div><div class="task-editor-footer"><div id="form-error" class="error" role="alert"></div><div class="modal-actions">${id?`<button type="button" class="danger" data-delete="${esc(id)}">删除任务</button>`:'<span></span>'}<div><button type="button" class="button secondary" data-action="close">取消</button><button type="submit" class="button primary">${id?'保存修改':'创建任务'}</button></div></div></div></form>`,'task-editor');
+ openModal(`<div class="modal-head"><h2 id="dialog-title">${id?'编辑搜索任务':'新建搜索任务'}</h2><button class="icon-button" data-action="close" aria-label="关闭">${icon('close')}</button></div><form id="task-form" data-id="${esc(id)}">${typeof taskImportReviewHtml==='function'?taskImportReviewHtml():''}<div class="task-editor-body"><aside class="task-basic-settings" aria-label="任务基本设置"><div class="form-field"><label for="name">任务名称</label><input id="name" name="name" required maxlength="40" value="${esc(t.name)}" placeholder="输入任务名称"></div><div class="form-field"><label for="interval">执行间隔（分钟）</label><input id="interval" name="interval" type="number" min="1" max="1440" step="1" required value="${esc(t.interval)}"></div><div class="form-field"><div class="task-role-label"><label for="task-role">绑定角色</label><button type="button" class="text-button" data-action="add-task-role">${icon('plus')}添加角色</button></div><select id="task-role" name="roleId" required><option value="">请选择角色</option>${searchRoles().map(role=>`<option value="${esc(role.id)}" ${t.roleId===role.id?'selected':''} ${canBindTaskRole(role.id,id)?'':'disabled'}>${esc(roleLabel(role.id))}（已绑定 ${state.tasks.filter(task=>task.roleId===role.id).length} 个任务）</option>`).join('')}</select>${!availableRoles.some(role=>canBindTaskRole(role.id,id))?'<p class="task-role-hint">暂无可绑定角色，点击“添加角色”即可继续，当前设置会保留。</p>':''}${roleLoadState==='error'?'<button type="button" class="text-button" data-action="reload-task-roles">重新加载角色</button>':''}</div><div class="form-field"><label for="task-collection-role">收藏角色（可选）</label><select id="task-collection-role" name="collectionRoleId"><option value="" ${!t.collectionRoleId?'selected':''}>未设置，收藏时选择角色</option>${t.collectionRoleId&&!availableRoles.some(role=>role.id===t.collectionRoleId)?`<option value="${esc(t.collectionRoleId)}" selected>原收藏角色已失效，请重新选择</option>`:''}${collectionRoles().map(role=>`<option value="${esc(role.id)}" ${t.collectionRoleId===role.id?'selected':''}>${esc(roleLabel(role.id))}</option>`).join('')}</select></div><div class="form-field"><label for="choose-servers">服务器</label><button type="button" id="choose-servers" class="server-picker-button" data-action="choose-servers" aria-expanded="false" aria-controls="task-server-dropdown"><span>${selected.length?'已选择 '+selected.length+' 个服务器':'全服（不选服务器）'}</span>${icon('arrow')}</button><div class="selected-servers-summary" title="${esc(selected.map(server=>server.region+' · '+server.name).join('、'))}">${esc(selected.map(server=>server.name).join('、')||'不选择服务器时搜索全服')}</div><section id="task-server-dropdown" class="server-dropdown" popover="manual" role="region" aria-label="选择任务服务器"></section></div><div class="form-field"><label for="category">商品分类</label><select id="category" name="category" required><option value="">请选择分类</option>${['角色','召唤兽','装备','灵饰','上古玉魄','召唤兽装备'].map(value=>`<option ${value===t.category?'selected':''}>${value}</option>`).join('')}</select></div>${!id?`<label class="task-start-option"><span><strong>直接启动</strong><small>创建后立即搜索一次，之后按设定间隔执行。</small></span><input type="checkbox" name="startImmediately" role="switch" aria-label="直接启动" ${t.startImmediately?'checked':''} ${!SearchParams.supportsCategory(t.category)?'disabled':''}></label>`:''}</aside><section class="task-filter-panel" aria-label="品类筛选"><div id="category-options">${SearchParams.supportsCategory(t.category)?categoryOptions(t.category):'<div class="task-filter-empty"><strong>选择商品分类</strong><p>在左侧选择品类后，在这里设置搜索条件。</p></div>'}</div></section></div><div class="task-editor-footer"><div id="form-error" class="error" role="alert"></div><div class="modal-actions">${id?`<button type="button" class="danger" data-delete="${esc(id)}">删除任务</button>`:'<span></span>'}<div><button type="button" class="button secondary" data-action="close">取消</button><button type="submit" class="button primary">${id?'保存修改':'创建任务'}</button></div></div></div></form>`,'task-editor');
 }
-function canBindTaskRole(roleId){return availableRoles.some(role=>role.id===roleId);}
+function canBindTaskRole(roleId){return searchRoles().some(role=>role.id===roleId);}
 function openTaskRoleLogin(){captureTaskDraft();if(!taskDraft)return;taskRoleReturn={draft:JSON.parse(JSON.stringify(taskDraft)),serverKeys:[...editorServerKeys]};openRoleLogin();}
 function returnTaskFromRole(roleId){
  if(!taskRoleReturn)return;const context=taskRoleReturn;taskRoleReturn=null;taskDraft=context.draft;editorServerKeys=new Set(context.serverKeys);
@@ -240,11 +240,11 @@ function returnTaskFromRole(roleId){
  renderTaskEditor();
 }
 async function finishSavedRole(result,version){
- const updateMaterials=()=>{if(typeof loadMaterialPrices==='function')void loadMaterialPrices().catch(()=>{});};
+ const updateMaterials=()=>{if(!result.role?.collectionOnly&&typeof loadMaterialPrices==='function')void loadMaterialPrices().catch(()=>{});};
  if(version!==roleModalVersion){await loadRoles();updateMaterials();return;}
  rolePending=null;await loadRoles();updateMaterials();if(version!==roleModalVersion)return;
  if(taskRoleReturn){returnTaskFromRole(result?.role?.id);toast('角色已添加，已返回原任务');}
- else{closeModal();toast('角色已保存，可以创建搜索任务');}
+ else{closeModal();toast(result.role?.collectionOnly?'角色已保存，仅用于收藏':'角色已保存，可以创建搜索任务');}
 }
 function categoryOptions(category){if(category==='上古玉魄')return yupoFiltersView();if(category==='灵饰')return lingshiFiltersView();if(category==='装备')return equipmentFiltersView();if(category==='召唤兽')return petFiltersView();if(category==='角色')return roleSearchFiltersView();if(category==='召唤兽装备')return petEquipmentFiltersView();return category?`<section class="category-options" data-category="${esc(category)}"><strong>${esc(category)}选项</strong><p>具体选项待添加</p></section>`:'';}
 document.addEventListener('click',async e=>{
@@ -256,7 +256,7 @@ document.addEventListener('click',async e=>{
  else if(b.dataset.edit)taskEditor(b.dataset.edit);
  else if(b.dataset.run)await runTask(b.dataset.run);
  else if(b.dataset.openTask){if(typeof openTaskResults==='function')void openTaskResults(b.dataset.openTask);else{selectedTaskId=b.dataset.openTask;page='task-detail';render();}void loadRoleEvents();}
- else if(b.dataset.toggle){const task=state.tasks.find(t=>t.id===b.dataset.toggle);if(task){if(!availableRoles.some(role=>role.id===task.roleId)){toast('请先编辑任务并绑定有效角色');return;}if(taskScheduler.setEnabled(task,!task.enabled,{immediate:true})===false)return;if(!taskStorageError)toast(task.enabled?'任务已启动，立即搜索一次':'任务已暂停并保存');if(task.enabled)await taskScheduler.tick()}}
+ else if(b.dataset.toggle){const task=state.tasks.find(t=>t.id===b.dataset.toggle);if(task){if(!searchRoles().some(role=>role.id===task.roleId)){toast('请先编辑任务并绑定有效角色');return;}if(taskScheduler.setEnabled(task,!task.enabled,{immediate:true})===false)return;if(!taskStorageError)toast(task.enabled?'任务已启动，立即搜索一次':'任务已暂停并保存');if(task.enabled)await taskScheduler.tick()}}
 
  
  else if(b.dataset.delete){const id=b.dataset.delete,nextTasks=state.tasks.filter(t=>t.id!==id);persist(nextTasks);state.tasks=nextTasks;cancelTaskSearch(id);closeModal();render();toast('任务已删除，历史结果仍保留')}
@@ -266,7 +266,7 @@ document.addEventListener('click',async e=>{
  else if(b.dataset.action==='close')closeModal();
  else if(b.dataset.action==='add-task-role')openTaskRoleLogin();
  else if(b.dataset.action==='reload-task-roles'){captureTaskDraft();await loadRoles();if(taskDraft)renderTaskEditor();}
- else if(b.dataset.action==='toggle-all'){const enable=!state.tasks.some(t=>t.enabled);state.tasks.forEach(task=>taskScheduler.setEnabled(task,enable&&availableRoles.some(role=>role.id===task.roleId),{immediate:true}));if(!taskStorageError)toast(enable?'已按每角色最多开启3个任务启动，其余任务保持关闭':'全部任务已暂停并保存');if(enable)await taskScheduler.tick()}
+ else if(b.dataset.action==='toggle-all'){const enable=!state.tasks.some(t=>t.enabled);state.tasks.forEach(task=>taskScheduler.setEnabled(task,enable&&searchRoles().some(role=>role.id===task.roleId),{immediate:true}));if(!taskStorageError)toast(enable?'已按每角色最多开启3个任务启动，其余任务保持关闭':'全部任务已暂停并保存');if(enable)await taskScheduler.tick()}
  else if(b.dataset.action==='toggle-task-notifications')toggleTaskNotifications(b.dataset.taskId);
  else if(b.dataset.action==='toggle-system-notifications')await toggleSystemNotifications();
  else if(b.dataset.action==='test-system-notification')await testSystemNotification();
@@ -279,7 +279,8 @@ document.addEventListener('submit',async e=>{
  const data=Object.fromEntries(new FormData(e.target)), id=e.target.dataset.id;
  const interval=Number(data.interval);
  if(!data.name.trim()||!Number.isInteger(interval)||interval<1||interval>1440||!['装备','召唤兽','角色','召唤兽装备','灵饰','上古玉魄'].includes(data.category)){document.querySelector('#form-error').textContent='请填写任务名称、有效的执行间隔并选择分类。';return;}
- if(!availableRoles.some(role=>role.id===data.roleId)){document.querySelector('#form-error').textContent='请先添加并绑定有效角色';return;}
+ if(!searchRoles().some(role=>role.id===data.roleId)){document.querySelector('#form-error').textContent='请先添加并绑定有效角色';return;}
+ if(data.collectionRoleId&&!availableRoles.some(role=>role.id===data.collectionRoleId)){document.querySelector('#form-error').textContent='请选择有效的收藏角色，或清空后在收藏时选择';return;}
  const oldTask=state.tasks.find(t=>t.id===id);
  if(typeof reconcileImportedServers==='function')reconcileImportedServers();
  let servers=serverList.filter(server=>editorServerKeys.has(server.key));
@@ -288,7 +289,7 @@ document.addEventListener('submit',async e=>{
  try{servers=SearchParams.normalizeServers(servers);}catch(error){document.querySelector('#form-error').textContent=error.message;return;}
  if(SearchParams.supportsCategory(data.category)){const error=data.category==='上古玉魄'?validateYupoFilters():data.category==='灵饰'?validateLingshiFilters():data.category==='装备'?validateEquipmentFilters():data.category==='召唤兽'?validatePetFilters():data.category==='召唤兽装备'?validatePetEquipmentFilters():validateRoleSearchFilters();if(error){document.querySelector('#form-error').textContent=error;return;}}
  const previous=state.tasks.find(t=>t.id===id),enabled=previous?previous.enabled:data.startImmediately==='on';
- const task={id:id||uid(),name:data.name.trim(),category:data.category,roleId:data.roleId,servers,interval,enabled:enabled&&SearchParams.supportsCategory(data.category),lastRunAt:previous?.lastRunAt||null,lastError:previous?.lastError||'',changeNotifications:previous?.changeNotifications===true,nextRunAt:null};
+ const task={id:id||uid(),name:data.name.trim(),category:data.category,roleId:data.roleId,collectionRoleId:data.collectionRoleId||'',servers,interval,enabled:enabled&&SearchParams.supportsCategory(data.category),lastRunAt:previous?.lastRunAt||null,lastError:previous?.lastError||'',changeNotifications:previous?.changeNotifications===true,nextRunAt:null};
  if(data.category==='上古玉魄'){task.yupoFilters=JSON.parse(JSON.stringify(yupoFilters()));task.valuationEnabled=previous?.category==='上古玉魄'&&previous.valuationEnabled===true;}
  if(data.category==='灵饰'){task.lingshiFilters=JSON.parse(JSON.stringify(lingshiFilters()));task.valuationEnabled=previous?.category==='灵饰'&&previous.valuationEnabled===true;}
  if(data.category==='装备'){task.equipmentFilters=JSON.parse(JSON.stringify(equipmentFilters()));const saved=previous?.category==='装备'?previous:null;task.valuationEnabled=saved?.valuationEnabled===true;}
@@ -300,14 +301,28 @@ document.addEventListener('submit',async e=>{
  const nextTasks=previous?state.tasks.map(item=>item.id===task.id?task:item):[task,...state.tasks];
  try{completeTaskSave(task,nextTasks,Boolean(previous));}catch(error){document.querySelector('#form-error').textContent=`保存失败：${error.message}`}
 });
+function setTaskCollectionRole(taskId,roleId){
+ const previous=state.tasks.find(task=>task.id===taskId);if(!previous)throw Error('该任务不存在，无法设置默认收藏角色');
+ if(!availableRoles.some(role=>role.id===roleId))throw Error('所选收藏角色已失效');
+ const next=state.tasks.map(task=>task.id===taskId?{...task,collectionRoleId:roleId}:task);persist(next);state.tasks=next;renderBackground();
+}
 function completeTaskSave(task,nextTasks,isEditing){
- const importing=!isEditing&&taskDraft?.importSource===true;
+ const importing=!isEditing&&taskDraft?.importSource===true,previous=isEditing?state.tasks.find(item=>item.id===task.id):null;
+ const productChanged=!!previous&&TaskStorage.productSignature(previous)!==TaskStorage.productSignature(task),roleChanged=!!previous&&previous.roleId!==task.roleId;
+ if(availableRoles.some(role=>role.id===task.roleId&&role.collectionOnly))throw Error('仅用于收藏的角色不能绑定搜索任务');
  const enabledError=SearchParams.roleEnabledTaskError(state.tasks,task);if(enabledError)throw Error(enabledError);
  if(!isEditing&&task.enabled)task.nextRunAt=Date.now();
- if(isEditing){task.lastRunAt=null;task.lastError='';task.lastViewedAt=null;task.resultRevision=uid();}
- persist(nextTasks);state.tasks=nextTasks;if(isEditing)clearTaskResults(task.id);if(importing)taskTransferSaving=true;try{closeModal();}finally{if(importing)taskTransferSaving=false;}
+ if(productChanged){task.lastRunAt=null;task.lastError='';task.lastViewedAt=null;task.resultRevision=uid();task.resultRoleId=null;}
+ else if(previous){for(const key of ['lastRunAt','lastError','lastViewedAt','resultRevision','resultRoleId','lastCompletedAt','lastSlowRun'])if(previous[key]!==undefined)task[key]=previous[key];if(roleChanged){task.lastError='';task.resultRoleId=previous.resultRoleId||previous.roleId;}}
+ persist(nextTasks);state.tasks=nextTasks;
+ if(productChanged)clearTaskResults(task.id);
+ else if(previous){
+  const run=state.taskRuns?.[task.id];if(run){run.taskName=task.name;if(roleChanged)run.sourceRoleId=run.sourceRoleId||previous.resultRoleId||previous.roleId;}
+  if(roleChanged){cancelTaskSearch(task.id);taskScheduler.reset(task);if(typeof preserveTaskValuationCaches==='function')preserveTaskValuationCaches(previous,task);}
+ }
+ if(importing)taskTransferSaving=true;try{closeModal();}finally{if(importing)taskTransferSaving=false;}
  if(!isEditing){page='tasks';taskFilter='all';taskRoleFilter='all';query='';}
- render();toast(isEditing?'任务已保存，旧搜索结果已清空，已启用任务重新计时':task.enabled?'任务已创建并启动':'任务已创建并保存，尚未启动');
+ render();toast(isEditing?productChanged?'商品条件已修改，旧搜索结果已清空，已启用任务重新计时':'任务配置已保存，搜索结果和浏览记录已保留':task.enabled?'任务已创建并启动':'任务已创建并保存，尚未启动');
  if(!isEditing&&task.enabled&&!taskScheduler.isRunning(task.id))void taskScheduler.run(task.id,'automatic');
  if(importing)advanceTaskImport(true,task.roleId);
 }

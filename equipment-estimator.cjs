@@ -13,7 +13,7 @@ function createEstimator({roles,gate,officialFetch,isCaptcha,isExpired,cacheDire
  async function load(){if(!loading)loading=(async()=>{if(!file)return;let data;try{data=JSON.parse(await fs.readFile(file,'utf8'));}catch(error){if(error.code==='ENOENT')return;throw Error('全服估价缓存无法读取，请保留文件后检查，未重新发起全服采样');}if(data.version!==1||!Array.isArray(data.entries))throw Error('全服估价缓存版本无效');for(const [key,entry] of data.entries)if(entry&&Number.isFinite(entry.at)&&Array.isArray(entry.rows))fullCache.set(key,entry);})();return loading;}
  async function save(){if(!file)return;const value=JSON.stringify({version:1,entries:[...fullCache].filter(([,entry],index,entries)=>now()-entry.at<THREE_HOURS||index>=entries.length-50)});const work=async()=>{await fs.mkdir(cacheDirectory,{recursive:true});const temp=file+'.tmp-'+crypto.randomUUID();try{await fs.writeFile(temp,value,{mode:0o600});await fs.rename(temp,file);}finally{await fs.rm(temp,{force:true});}};saveQueue=saveQueue.then(work,work);return saveQueue;}
  async function data(context,params){
-  context.signal?.throwIfAborted();if(++context.requests>(context.materialPricing?800:180))throw Object.assign(Error('本组采样请求较多，已停止；请细化装备参数'),{valuationFatal:true});
+  context.signal?.throwIfAborted();if(roles.get&&(await roles.get(context.task.roleId))?.collectionOnly)throw Error('仅用于收藏的角色不能搜索或估价');if(++context.requests>(context.materialPricing?800:180))throw Object.assign(Error('本组采样请求较多，已停止；请细化装备参数'),{valuationFatal:true});
   const url=P.requestUrl({params:{...params,order_by:'price ASC'}});context.logs.push({url,at:now(),message:context.stage});context.onRequest?.(context.logs.at(-1));
   const send=async session=>gate.run(context.task.roleId,async()=>{
    if(session&&roles.cookieSnapshot)Object.assign(session,await roles.cookieSnapshot(context.task.roleId,url,{signal:context.signal}));
@@ -36,7 +36,7 @@ function createEstimator({roles,gate,officialFetch,isCaptcha,isExpired,cacheDire
  async function saveMaterials(){const payload={version:2,servers:[...materialCache.values()]};const serialized=JSON.stringify(payload),work=()=>atomicJson(materialFile,JSON.parse(serialized));materialSaveQueue=materialSaveQueue.then(work,work);return materialSaveQueue;}
  function customFor(serverId){return customPrices.servers[String(serverId)]||{};}
  function completed(entry){return V.MATERIALS.every(material=>V.marketGrades(material).every(grade=>entry.quotes[material.id]?.[grade]||entry.missing[material.id]?.[grade]||customFor(entry.serverId)[material.id]?.[grade]));}
- async function materialSnapshot(errors=[]){await loadMaterials();const bound=roles.list?await roles.list():[],ids=new Set(bound.map(role=>String(role.server?.id||'')));return {day:dayKey(),revision:customPrices.revision,materials:V.MATERIALS,errors,servers:[...ids].filter(id=>/^\d+$/.test(id)).map(id=>{const cached=materialCache.get(id),entry=cached?.day===dayKey()?cached:{serverId:id,server:bound.find(role=>String(role.server?.id)===id)?.server?.name||'',day:dayKey(),quotes:{},missing:{},complete:false};return {...entry,complete:entry.complete&&completed(entry),custom:customFor(id)};})};}
+ async function materialSnapshot(errors=[]){await loadMaterials();const bound=roles.list?(await roles.list()).filter(role=>!role.collectionOnly):[],ids=new Set(bound.map(role=>String(role.server?.id||'')));return {day:dayKey(),revision:customPrices.revision,materials:V.MATERIALS,errors,servers:[...ids].filter(id=>/^\d+$/.test(id)).map(id=>{const cached=materialCache.get(id),entry=cached?.day===dayKey()?cached:{serverId:id,server:bound.find(role=>String(role.server?.id)===id)?.server?.name||'',day:dayKey(),quotes:{},missing:{},complete:false};return {...entry,complete:entry.complete&&completed(entry),custom:customFor(id)};})};}
  async function ensureMaterials(context,serverId,materialId=null){
   await loadMaterials();context.signal?.throwIfAborted();const key=String(serverId),day=dayKey();
   if(materialCache.get(key)?.day===day&&materialCache.get(key).complete&&completed(materialCache.get(key)))return materialCache.get(key);
@@ -78,7 +78,7 @@ function createEstimator({roles,gate,officialFetch,isCaptcha,isExpired,cacheDire
  }
  async function preloadMaterials({signal,onRequest}={}){
   if(preloading){await preloading;signal?.throwIfAborted();return preloadMaterials({signal,onRequest});}
-  const work=(async()=>{await loadMaterials();const list=roles.list?await roles.list():[],seen=new Set(),errors=[];
+  const work=(async()=>{await loadMaterials();const list=roles.list?(await roles.list()).filter(role=>!role.collectionOnly):[],seen=new Set(),errors=[];
    for(const role of list){const serverId=String(role.server?.id||'');if(!/^\d+$/.test(serverId)||seen.has(serverId))continue;
     const context={task:{id:'material-prices:'+serverId,roleId:role.id},buyerServer:serverId,serverName:role.server?.name,signal,onRequest,requests:0,logs:[]};
     try{await ensureMaterials(context,serverId);seen.add(serverId);}catch(error){if(signal?.aborted)throw error;errors.push({serverId,message:error.message});}
@@ -87,7 +87,7 @@ function createEstimator({roles,gate,officialFetch,isCaptcha,isExpired,cacheDire
   })();preloading=work;try{return await work;}finally{if(preloading===work)preloading=null;}
  }
  async function setCustomPrice(input){
-  await loadMaterials();const serverId=String(input?.serverId||''),material=V.MATERIALS.find(m=>m.id===input?.materialId),grade=Number(input?.grade),list=roles.list?await roles.list():[];
+  await loadMaterials();const serverId=String(input?.serverId||''),material=V.MATERIALS.find(m=>m.id===input?.materialId),grade=Number(input?.grade),list=roles.list?(await roles.list()).filter(role=>!role.collectionOnly):[];
   if(!/^\d+$/.test(serverId)||!list.some(role=>String(role.server?.id)===serverId))throw Error('只能设置已登录角色所在服务器的材料价格');
   if(!material||!Number.isInteger(grade)||grade<1||grade>V.materialMaxGrade(material))throw Error('材料或等级无效');
   let cents=null;if(input.reset!==true){const value=String(input.price??'');if(!/^\d+(?:\.\d{1,2})?$/.test(value)||Number(value)<=0||Number(value)>1e9)throw Error('价格必须大于零，最多两位小数');cents=Math.round(Number(value)*100);}
@@ -191,6 +191,7 @@ function createEstimator({roles,gate,officialFetch,isCaptcha,isExpired,cacheDire
   if(!Array.isArray(input.seedRows)||input.seedRows.length>10000)throw Error('估价初始样本格式无效');
   const total=Sampling.taskTotal(input),batchSize=Sampling.batchSize(total);
   const role=await roles.get(task.roleId),context={task,signal,onRequest,settings:config,requests:0,logs:[],settled:new Set(),stage:'确认跨服状态',excluded:0,exclusionReasons:new Set(),buyerServer:String(role.server.id),serverName:role.server.name||'',buyerOld:false};
+  if(role.collectionOnly)throw Error('仅用于收藏的角色不能搜索或估价');
   context.batchSize=batchSize;context.library=await library.open(task,context.buyerServer,input.seedRows.map(slim));
   const seeds=input.seedRows.filter(r=>String(r.equipmentKindId)===String(group.kindId)&&Number(r.level)===group.level).map(r=>slim({...r,...(Number.isFinite(batchSize)?{samplingMinimum:5}:{})}));
   const belowFloor=target=>!!V.skipReason(target),skipped=target=>({target,count:0,estimateCents:null,sampleEstimateCents:null,skipped:true,error:V.skipReason(target)});
@@ -262,7 +263,7 @@ function createEstimator({roles,gate,officialFetch,isCaptcha,isExpired,cacheDire
   return {version:V.COMPARISON_VERSION,group,taskItemCount:total,samplingBatchSize:Number.isFinite(batchSize)?batchSize:null,at:now(),sampledAt:entry.at,updatedAt:entry.updatedAt,nextFullAt:entry.at+THREE_HOURS,cached,scope:'full',expanded:true,complete:entry.complete===true,ageMethod:'cross-fee',count:prepared.size,rules,coverage:entry.coverage,refreshEligible:refreshIds.size>0,...(refreshIds.size?{refreshToken:entry.refreshToken}:{}),items,warnings,logs:context.logs};
  }
  async function marketPage(task,params,{signal,onRequest}={}){return data({task,signal,onRequest,requests:0,logs:[],stage:'灵饰全服采样'},params);}
- async function materialQuote(roleId,id,grade,{signal,onRequest,priority=0}={}){const role=await roles.get(roleId),serverId=String(role.server.id),material=V.MATERIALS.find(m=>m.id===id);if(!material)throw Error('材料类型无效');if(preloading&&!priority)await preloading;const context={priority,task:{id:'material-for-valuation',roleId,category:'灵饰',...(priority?{requestPriority:'interactive'}:{})},buyerServer:serverId,serverName:role.server.name,signal,onRequest,requests:0,logs:[],stage:'材料报价'};const entry=await ensureMaterials(context,serverId,priority?id:null);let q=V.resolveMaterialPrice(material,grade,{...entry,custom:customFor(serverId)});if((!q||q.source==='group')&&priority&&material.family==='clock'){for(const peer of V.clockPricePeers(material))await ensureMaterials(context,serverId,peer.id);q=V.resolveMaterialPrice(material,grade,{...entry,custom:customFor(serverId)});}if(!q)throw Error('缺少'+grade+'级'+material.name+'报价');return q;}
+ async function materialQuote(roleId,id,grade,{signal,onRequest,priority=0}={}){const role=await roles.get(roleId);if(role.collectionOnly)throw Error('仅用于收藏的角色不加载材料报价');const serverId=String(role.server.id),material=V.MATERIALS.find(m=>m.id===id);if(!material)throw Error('材料类型无效');if(preloading&&!priority)await preloading;const context={priority,task:{id:'material-for-valuation',roleId,category:'灵饰',...(priority?{requestPriority:'interactive'}:{})},buyerServer:serverId,serverName:role.server.name,signal,onRequest,requests:0,logs:[],stage:'材料报价'};const entry=await ensureMaterials(context,serverId,priority?id:null);let q=V.resolveMaterialPrice(material,grade,{...entry,custom:customFor(serverId)});if((!q||q.source==='group')&&priority&&material.family==='clock'){for(const peer of V.clockPricePeers(material))await ensureMaterials(context,serverId,peer.id);q=V.resolveMaterialPrice(material,grade,{...entry,custom:customFor(serverId)});}if(!q)throw Error('缺少'+grade+'级'+material.name+'报价');return q;}
  return {estimate,marketPage,materialQuote,preloadMaterials,setCustomPrice,materialSnapshot,flush:()=>Promise.all([saveQueue,materialSaveQueue,customQueue])};
 }
 module.exports={createEstimator,THREE_HOURS,slim};

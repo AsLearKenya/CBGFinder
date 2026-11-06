@@ -3,7 +3,7 @@
  'use strict';
  const FORMAT='cbg-finder.tasks',VERSION=1,MAX_TASKS=1000,MAX_TEXT=5*1024*1024;
  const FIELDS=['name','category','servers','interval','equipmentFilters','petFilters','roleFilters','petEquipmentFilters','lingshiFilters','yupoFilters'];
- const PRIVATE=new Set(['__proto__','prototype','constructor','roleId','gameRoleId','account','password','cookies','cookie','token','session']);
+ const PRIVATE=new Set(['__proto__','prototype','constructor','roleId','collectionRoleId','resultRoleId','gameRoleId','account','password','cookies','cookie','token','session']);
  function clean(value,depth=0){if(depth>30)throw Error('任务参数嵌套过深');if(Array.isArray(value))return value.map(v=>clean(v,depth+1));if(value&&typeof value==='object')return Object.fromEntries(Object.entries(value).filter(([k])=>!PRIVATE.has(k)).map(([k,v])=>[k,clean(v,depth+1)]));return value;}
  function task(source,index=0){try{if(!source||typeof source!=='object'||Array.isArray(source))throw Error('任务必须是对象');const picked=clean(Object.fromEntries(FIELDS.filter(k=>Object.hasOwn(source,k)).map(k=>[k,source[k]])));if(typeof picked.name!=='string'||!picked.name.trim()||picked.name.trim().length>40)throw Error('任务名称需为1～40个字符');picked.name=picked.name.trim();const projected=Storage.project({...picked,id:'portable-'+index});return Object.fromEntries(FIELDS.filter(k=>projected[k]!==undefined).map(k=>[k,projected[k]]));}catch(e){throw Error('第'+(index+1)+'个任务：'+e.message);}}
  function documentFor(tasks){if(!Array.isArray(tasks)||!tasks.length||tasks.length>MAX_TASKS)throw Error('请选择1～'+MAX_TASKS+'个任务');return {format:FORMAT,version:VERSION,tasks:tasks.map(task)};}

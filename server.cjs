@@ -100,7 +100,7 @@ function createServer({upstreamFetch=globalThis.fetch,officialFetch=(roleId,url,
     const input=await readJson(req);
     if(typeof input.roleId!=='string'||!input.roleId||!/^\d{1,6}$/.test(String(input.serverId))||!/^\d{15}-\d+-[A-Za-z0-9]{1,40}$/.test(String(input.eid)))throw Error('商品详情参数无效');
     // Official EIDs may retain the original server after a move/merge; use the listing server.
-    await roleManager.get(input.roleId);
+    if((await roleManager.get(input.roleId))?.collectionOnly)throw Error('仅用于收藏的角色不能读取商品详情');
     const key=JSON.stringify([input.roleId,String(input.serverId),input.eid]);
     if(input.priority==='interactive')requestGate.promote?.(input.roleId,'detail:'+key,10);
     const cached=detailCache.get(key);if(cached&&cached.until>Date.now()){json(res,200,await cached.promise);return;}
@@ -143,7 +143,7 @@ function createServer({upstreamFetch=globalThis.fetch,officialFetch=(roleId,url,
     else if(pathname==='/api/roles/login-focus')json(res,200,await roleManager.focusLogin(input));
     else if(pathname==='/api/roles/save')json(res,200,{role:await roleManager.save(input)});
     else if(pathname==='/api/roles/cancel'){roleManager.cancel(input.pendingId);json(res,200,{ok:true});}
-    else if(pathname==='/api/roles/settings')json(res,200,{role:await roleManager.settings(input.id,input)});
+    else if(pathname==='/api/roles/settings'){if(input.collectionOnly!==undefined&&roleManager.get&&input.collectionOnly!==!!(await roleManager.get(input.id)).collectionOnly&&(requestGate.snapshot(input.id).active||requestGate.snapshot(input.id).queued))throw Error('请等待该角色当前请求结束后再修改用途');json(res,200,{role:await roleManager.settings(input.id,input)});}
     else if(pathname==='/api/roles/refresh'){const role=await roleManager.refresh(input.id);requestGate.resume(input.id);json(res,200,{role});}
     else if(pathname==='/api/roles/delete'){await roleManager.remove(input.id);json(res,200,{ok:true});}
     else json(res,404,{message:'接口不存在'});
@@ -158,6 +158,7 @@ function createServer({upstreamFetch=globalThis.fetch,officialFetch=(roleId,url,
    if(checkingVerification){checkingRoleId=task.roleId;input.planIndex=0;input.page=1;if(roleManager.verifying?.has(task.roleId))throw Error('请先关闭正在进行的验证窗口');const previous=verificationCheckTimes.get(task.roleId);if(previous!==undefined&&Date.now()-previous<30000)throw Error('已检查过该角色，请30秒后再试');verificationCheckTimes.set(task.roleId,Date.now());}
    if(typeof task.roleId!=='string'||!task.roleId)throw Error('请先为任务绑定角色');
    if(typeof task.id!=='string'||!task.id)throw Error('任务编号无效');
+   if(roleManager.get&&(await roleManager.get(task.roleId))?.collectionOnly)throw Error('仅用于收藏的角色不能搜索或绑定任务');
    const requestKey=JSON.stringify([task.id,input.planIndex]);
    if(activeRequests.has(requestKey)){send(res,409,'该任务已有搜索请求正在执行');return;}
    activeTaskId=requestKey;activeRequests.add(activeTaskId);

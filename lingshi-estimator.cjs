@@ -32,6 +32,7 @@ function createLingshiEstimator({roles,equipment,cacheDirectory,now=Date.now,cat
   const task=input?.task;if(task?.category!==category||!task.valuationEnabled||typeof task.roleId!=='string'||!task.roleId)throw Error('请先开启'+category+'估价');P.buildPlans(task);if(!Array.isArray(input.seedRows)||input.seedRows.length>10000)throw Error(category+'目标格式无效');
   const total=Sampling.taskTotal(input),batchSize=Sampling.batchSize(total);
   const role=await roles.get(task.roleId),buyer=String(role.server.id),settings=B.settings(input.settings),group=input.group;if(!group||!(isPet?['1','2','3']:isYupo?['61717','61718']:['61','62','63','64']).includes(String(group.kindId))||!(isPet?Array.from({length:15},(_,i)=>5+i*10):isYupo?[0]:[60,80,100,120,140,160]).includes(group.level))throw Error(category+'分组无效');
+  if(role.collectionOnly)throw Error('仅用于收藏的角色不能搜索或估价');
   const targets=input.seedRows.filter(i=>String(i.equipmentKindId)===String(group.kindId)&&Number(i.level)===group.level).map(t=>({...t,...(Number.isFinite(batchSize)?{samplingMinimum:5}:{})})),key=crypto.createHash('sha256').update(JSON.stringify([B.COMPARISON_VERSION,Sampling.VERSION,V.VERSION,task.roleId,buyer,task.id,Number.isFinite(batchSize)?batchSize:0,group,task[filterKey],[...new Set(targets.map(t=>Sampling.mode(t)))].sort()])).digest('hex');await load();if(pending.has(key))await pending.get(key);signal?.throwIfAborted();
   const pool=await library.open(task,buyer,input.seedRows);
   if(targets.every(t=>V.reason(t)))await library.flush();
