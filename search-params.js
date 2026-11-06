@@ -119,6 +119,7 @@
   for(const [key,min,max] of [['addedFront',1,11],['addedBack',12,19]])if(f[key]!==undefined){if(!Array.isArray(f[key])||f[key].length>3)throw Error('每组最多选择三条附加属性');for(const id of f[key].filter(has)){const value=integer(id,'附加属性',min,max),param='added_attr.'+value;p[param]=String(Number(p[param]||0)+1);}}
   if(Object.keys(p).some(key=>key.startsWith('added_attr.')))p.added_attr_logic='detail';
   if(has(f.synthesizedType)){const id=integer(f.synthesizedType,'综合属性',1,19);p.synthesized_attr_total=JSON.stringify({[id]:integer(has(f.synthesizedValue)?f.synthesizedValue:1,'综合属性数值',0,999999)});}else if(has(f.synthesizedValue))throw Error('请选择综合属性类型');
+  if(f.synthesizedTotals!==undefined){if(!f.synthesizedTotals||typeof f.synthesizedTotals!=='object'||Array.isArray(f.synthesizedTotals))throw Error('综合属性范围无效');const totals={};for(const [id,value] of Object.entries(f.synthesizedTotals)){const key=integer(id,'综合属性',1,19);totals[key]=integer(value,'综合属性数值',0,999999);}if(Object.keys(totals).length)p.synthesized_attr_total=JSON.stringify(totals);}
   for(const [key,label,max] of [['jinglian_level','精炼等级',16],['repair_fail','修理失败次数上限',3],['suit_effect','套装效果',999],['suit_effect_level','套装等级',99]])if(has(f[key]))p[key]=integer(f[key],label,key==='suit_effect'?1:0,max);
   if(has(f.suit_effect_level)&&!has(f.suit_effect))throw Error('请选择套装效果');
   if(f.special_effect===true)p.special_effect='1';

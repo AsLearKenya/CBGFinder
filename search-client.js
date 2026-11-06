@@ -119,7 +119,7 @@ async function runEquipmentOnce(id,source='manual',{retryFailed=false}={}){
   run.running=false;run.cancelled=controller.signal.aborted&&!fatalFailure;
   if(run.retired){searchControllers.delete(id);busy.delete(id);renderBackground();return;}
   const current=state.tasks.find(item=>item.id===id);if(current){current.lastRunAt=Date.now();current.lastError=run.records.find(record=>record.error)?.error||'';}
-  const verificationError=run.records.find(record=>/CAPTCHA_AUTH|验证码/.test(record.error||''))?.error;
+  const verificationError=run.records.find(record=>/CAPTCHA_AUTH|MIBAO_AUTH|OTP_AUTH|ACCOUNT_RESTRICTED|验证码/.test(record.error||''))?.error;
   if(verificationError)for(const peer of state.tasks.filter(peer=>peer.roleId===task.roleId)){peer.lastError=verificationError;peer.nextRunAt=null;}
   if(typeof recordTaskChanges==='function')await recordTaskChanges(task,run);
   if(!run.retired&&!run.cancelled&&!run.records.some(record=>record.error)&&typeof runEquipmentValuation==='function')await runEquipmentValuation(task,run,controller.signal);

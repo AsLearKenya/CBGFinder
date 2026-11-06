@@ -109,7 +109,7 @@ async function checkTaskVerification(task,{quiet=false}={}){
   verificationCheckResults.set(task.roleId,{...result,at:Date.now()});
   if(result.available){
    if(result.role)availableRoles=availableRoles.map(role=>role.id===task.roleId?result.role:role);else availableRoles=availableRoles.map(role=>role.id===task.roleId?{...role,requestQueue:{...role.requestQueue,blocked:''}}:role);
-   const peers=state.tasks.filter(peer=>peer.roleId===task.roleId);for(const peer of peers)if(/CAPTCHA_AUTH|验证码|MIBAO_AUTH|OTP_AUTH|官方验证窗口/.test(peer.lastError||''))peer.lastError='';for(const peer of peers)taskScheduler.reset(peer);persist();if(!quiet)toast('实际请求已恢复，无需验证码');
+   const peers=state.tasks.filter(peer=>peer.roleId===task.roleId);for(const peer of peers)if(/CAPTCHA_AUTH|验证码|MIBAO_AUTH|OTP_AUTH|ACCOUNT_RESTRICTED|保护性冻结|账号冻结|帐号冻结|官方验证窗口/.test(peer.lastError||''))peer.lastError='';for(const peer of peers)taskScheduler.reset(peer);persist();if(!quiet)toast('实际请求已恢复，无需验证码');
   }else if(result.requiresAccountSecurity){
    availableRoles=availableRoles.map(role=>role.id===task.roleId?{...role,requestQueue:{...role.requestQueue,blocked:result.message}}:role);
    for(const peer of state.tasks.filter(peer=>peer.roleId===task.roleId)){peer.lastError=result.message;peer.nextRunAt=null;}persist();if(!quiet)toast(result.message);
@@ -120,9 +120,9 @@ async function checkTaskVerification(task,{quiet=false}={}){
  }catch(error){if(!quiet)toast(error.message);return {available:false,message:error.message};}finally{verificationChecks.delete(task.roleId);render();}})();verificationChecks.set(task.roleId,pending);render();return pending;
 }
 async function checkSavedVerificationStates(){
- const checked=new Set();for(const task of state.tasks){if(!(taskNeedsVerification(task)||taskNeedsAccountSecurity(task))||checked.has(task.roleId))continue;checked.add(task.roleId);await checkTaskVerification(task,{quiet:true});}
+ const checked=new Set();for(const task of state.tasks){if(/ACCOUNT_RESTRICTED|保护性冻结|账号冻结|帐号冻结/.test((availableRoles.find(r=>r.id===task.roleId)?.requestQueue?.blocked||'')+' '+(task.lastError||'')))continue;if(!(taskNeedsVerification(task)||taskNeedsAccountSecurity(task))||checked.has(task.roleId))continue;checked.add(task.roleId);await checkTaskVerification(task,{quiet:true});}
 }
-function taskNeedsAccountSecurity(task){const role=availableRoles.find(role=>role.id===task.roleId);return /MIBAO_AUTH|OTP_AUTH/.test(role?.requestQueue?.blocked||'')||state.tasks.some(peer=>peer.roleId===task.roleId&&/MIBAO_AUTH|OTP_AUTH/.test(peer.lastError||''));}
+function taskNeedsAccountSecurity(task){const role=availableRoles.find(role=>role.id===task.roleId);return /MIBAO_AUTH|OTP_AUTH|ACCOUNT_RESTRICTED|保护性冻结|账号冻结|帐号冻结/.test(role?.requestQueue?.blocked||'')||state.tasks.some(peer=>peer.roleId===task.roleId&&/MIBAO_AUTH|OTP_AUTH|ACCOUNT_RESTRICTED|保护性冻结|账号冻结|帐号冻结/.test(peer.lastError||''));}
 function taskNeedsVerification(task){
  const role=availableRoles.find(role=>role.id===task.roleId);
  return /CAPTCHA_AUTH|验证码|官方验证窗口/.test(role?.requestQueue?.blocked||'')||state.tasks.some(peer=>peer.roleId===task.roleId&&/CAPTCHA_AUTH|验证码|官方验证窗口/.test(peer.lastError||''));
@@ -134,7 +134,7 @@ function taskVerificationUrl(task){
 }
 function taskVerificationNotice(task){
  if(taskNeedsAccountSecurity(task)){
-  const role=availableRoles.find(role=>role.id===task.roleId),message=role?.requestQueue?.blocked||state.tasks.find(peer=>peer.roleId===task.roleId&&/MIBAO_AUTH|OTP_AUTH/.test(peer.lastError||''))?.lastError||'';
+  const role=availableRoles.find(role=>role.id===task.roleId),message=role?.requestQueue?.blocked||state.tasks.find(peer=>peer.roleId===task.roleId&&/MIBAO_AUTH|OTP_AUTH|ACCOUNT_RESTRICTED|保护性冻结|账号冻结|帐号冻结/.test(peer.lastError||''))?.lastError||'';
   const pending=verificationChecks.has(task.roleId)||roleOperations.has(task.roleId);
   return `<div class="task-verification" role="alert"><div><strong>需要处理账号安全状态</strong><p>${esc(message)}</p><p>${window.desktopVerification?'在官方窗口中输入将军令，完成后点击“验证完成”。':'官网浏览器与本地会话独立；桌面版支持在同一会话内验证。'}</p></div><div class="task-verification-actions">${window.desktopVerification?`<button type="button" class="button primary" data-manual-verify-task="${esc(task.id)}" ${pending?'disabled':''}>在当前会话中验证</button>`:`<button type="button" class="button primary" data-refresh-verification="${esc(task.id)}" ${pending?'disabled':''}>${roleOperations.has(task.roleId)?'正在刷新…':'刷新会话并重试'}</button>`}<button type="button" class="button secondary" data-check-verification="${esc(task.id)}" ${pending?'disabled':''}>尝试请求</button></div></div>`;
  }
@@ -200,7 +200,7 @@ async function handleManualVerificationMessage(event){
   const result=await roleApi('verification/submit',{id:flow.id,validate:data.value});
   if(manualVerification!==flow)return;
   availableRoles=availableRoles.map(role=>role.id===flow.roleId?result.role:role);
-  for(const peer of state.tasks.filter(task=>task.roleId===flow.roleId)){if(/CAPTCHA_AUTH|验证码|MIBAO_AUTH|OTP_AUTH|官方验证窗口/.test(peer.lastError||''))peer.lastError='';taskScheduler.reset(peer);}
+  for(const peer of state.tasks.filter(task=>task.roleId===flow.roleId)){if(/CAPTCHA_AUTH|验证码|MIBAO_AUTH|OTP_AUTH|ACCOUNT_RESTRICTED|保护性冻结|账号冻结|帐号冻结|官方验证窗口/.test(peer.lastError||''))peer.lastError='';taskScheduler.reset(peer);}
   event.source.postMessage({nonce:flow.nonce,type:'success'},'*');
   flow.popup?.close();clearTimeout(flow.loadTimer);
   manualVerification=null;roleOperations.delete(flow.roleId);closeModal();
@@ -243,7 +243,7 @@ async function openDesktopVerification(taskId,roleId){
  roleOperations.add(roleId);render();
  try{
   const task=state.tasks.find(task=>task.id===taskId)||state.tasks.find(task=>task.roleId===roleId);
-  const account=task?taskNeedsAccountSecurity(task):/MIBAO_AUTH|OTP_AUTH/.test(availableRoles.find(role=>role.id===roleId)?.requestQueue?.blocked||'');
+  const account=task?taskNeedsAccountSecurity(task):/MIBAO_AUTH|OTP_AUTH|ACCOUNT_RESTRICTED|保护性冻结|账号冻结|帐号冻结/.test(availableRoles.find(role=>role.id===roleId)?.requestQueue?.blocked||'');
   const opened=await window.desktopVerification.open({roleId,kind:account?'account':'captcha',url:task?taskVerificationUrl(task):undefined});
   desktopVerificationFlow={roleId,taskId:task?.id,busy:false};availableRoles=availableRoles.map(role=>role.id===roleId?{...role,requestQueue:{...role.requestQueue,blocked:'官方验证窗口已打开，等待手动验证'}}:role);render();
   openModal(`<div class="modal-head"><h2 id="dialog-title">在当前角色会话中完成验证</h2><button class="icon-button" data-action="close" aria-label="关闭">${icon('close')}</button></div><p>已在独立窗口打开官方页面，沿用此角色的任务会话。请在窗口内完成将军令或滑块验证；如先显示搜索页，请点击官方搜索触发验证。</p><p>建议先使用手机藏宝阁登录对应账号完成验证，再点击“验证完成”检查当前会话。请求恢复后，同账号所有已开启任务会立即搜索一次。</p><p id="desktop-verification-status" role="status">${esc(desktopVerificationStatus(opened?.page))}</p><div class="modal-actions"><button class="button secondary" data-action="focus-official-verification">打开验证窗口</button><button class="button primary" data-action="finish-official-verification">验证完成</button></div>`,'human-verification-modal');

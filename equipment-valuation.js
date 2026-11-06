@@ -1,6 +1,6 @@
 (function(root,factory){const api=factory(typeof module==='object'&&module.exports?require('./equipment-attribute-focus.js'):root.EquipmentAttributeFocus,typeof module==='object'&&module.exports?require('./equipment-openings.js'):root.EquipmentOpenings,typeof module==='object'&&module.exports?require('./lingshi.js'):root.Lingshi,typeof module==='object'&&module.exports?require('./pet-equipment-valuation.js'):root.PetEquipmentValuation);if(typeof module==='object'&&module.exports)module.exports=api;else root.EquipmentValuation=api;})(typeof globalThis==='object'?globalThis:this,function(AttributeFocus,EquipmentOpenings,Lingshi,PetValuation){
  'use strict';
- const COMPARISON_VERSION=38;
+ const COMPARISON_VERSION=40;
  const STORAGE_KEY='cbg:equipment-valuation:v1';
  const GEM_TYPES=Object.freeze({'1':{name:'红玛瑙',type:'4011'},'2':{name:'太阳石',type:'4002'},'3':{name:'舍利子',type:'4012'},'4':{name:'光芒石',type:'4004'},'5':{name:'月亮石',type:'4003'},'6':{name:'黑宝石',type:'4010'},'7':{name:'神秘石',type:null},'12':{name:'翡翠石',type:'4249'},'4006':{name:'红宝石',type:null},'4007':{name:'黄宝石',type:null},'4008':{name:'蓝宝石',type:null},'4009':{name:'绿宝石',type:null}});
  const MATERIALS=Object.freeze([...Object.entries(GEM_TYPES).filter(([,gem])=>gem.type!==null).map(([gemId,gem])=>({id:gemId,...gem,family:'gem'})),{id:'starlight',name:'星辉石',type:'4244',family:'starlight'},{id:'dust',name:'五色灵尘',type:'61719',family:'dust'},...Lingshi.CLOCK_TYPES,...PetValuation.MATERIALS]);
@@ -36,6 +36,7 @@
   if(!candidates.length)return null;const base=candidates[0];
   return {grade,priceCents:Math.max(1,Math.round(materialPrice(material,grade,base))),serverId:String(entry.serverId),source:'computed',basisGrade:base.grade,basisSource:base.source,floorAdjusted:floorLimited,missingMarketFallback:material.family==='starlight'&&marketGrades(material).includes(grade)&&!valid(market[grade]),at:base.at};
  }
+ const PHYSICAL_POWER_SPLIT=60; // Query partition only; larger values use an overflow query.
  const WEAPON_GROUPS=[['14','6'],['4','10'],['15','5','53','91'],['14','4','6','10','15','5','53','91','7','8','9','11','12','13','52','54','72','73','74']];
  const ALL_WEAPONS=new Set([...WEAPON_GROUPS.flat(),'83']);
  const HOLE_KEYS=['60','90','120','130','140','150','160'];
@@ -369,10 +370,18 @@
   return supportedPrices(candidates.valid,{targetPriceCents:targetAskingCents(target),excluded:candidates.excluded,now,isExact:row=>exactAttributes(target,row.sample,rules)});
  }
  function targetAskingCents(target){return target&&(!target.carriedTarget||target.independentListing)&&Number.isFinite(target.price)&&target.price>0?Math.round(target.price*100):null;}
+ function enforceRoughValidity(row){
+  if(!row||row.precise||row.skipped||row.insufficientSamples)return row;
+  const asking=targetAskingCents(row.target),estimate=row.estimateCents,rough=row.rough===true||Number.isFinite(row.count)&&row.count<sampleRequirement(row.target);
+  if(!rough||!Number.isSafeInteger(asking)||!Number.isSafeInteger(estimate)||estimate<=0||asking*5>=estimate*4)return row;
+  return {...row,estimateCents:null,insufficientSamples:true,invalidEstimateCents:estimate,insufficientReason:'粗略估价溢价率低于−20%，样本不足'};
+ }
+ function sampleRequirement(target){return (targetAskingCents(target)??0)>=500000?3:5;}
  function supportedPrices(input,{excluded=0,now=Date.now(),isExact=()=>false,targetPriceCents=null}={}){
   const valid=input.filter(row=>listingDiscount(row.sample.valuationMeta,now).remainingDays!==0).sort((a,b)=>a.converted.totalCents-b.converted.totalCents||String(a.sample.id).localeCompare(String(b.sample.id)));excluded+=input.length-valid.length;
   const ages=valid.map(row=>listingDiscount(row.sample.valuationMeta,now));
-  const requiredSupportCount=valid.length<5?1:2;
+  const requiredSampleCount=Number.isSafeInteger(targetPriceCents)&&targetPriceCents>=500000?3:5;
+  const requiredSupportCount=requiredSampleCount===3||valid.length<5?1:2;
   const hasPriceSupport=i=>i+requiredSupportCount<valid.length&&valid[i+requiredSupportCount].converted.totalCents*100<=valid[i].converted.totalCents*120;
   const hasAgeSupport=i=>ages[i].listingDays>7&&ages[i].remainingDays>0;
   const nearTarget=valid.length>0&&Number.isSafeInteger(targetPriceCents)&&targetPriceCents>0&&Math.abs(valid[0].converted.totalCents-targetPriceCents)*100<=targetPriceCents*10;
@@ -380,10 +389,10 @@
   const anchor=index<0?null:valid[index],price=anchor?.converted.totalCents??null;
   const supportBasis=anchor?(hasPriceSupport(index)?'prices':hasAgeSupport(index)?'listing-age':'target-price'):null,anchorListingDays=anchor?ages[index].listingDays:null;
   const supporters=anchor?valid.slice(index+1).filter(row=>row.converted.totalCents*100<=price*120):[];
-  const chosen=new Set(anchor?[anchor,...supporters.slice(0,requiredSupportCount),...valid.slice(0,2)]:[]);
-  for(const row of valid){if(chosen.size>=5)break;chosen.add(row);}
+  const chosen=new Set();
+  for(const row of [...(anchor?[anchor,...supporters.slice(0,requiredSupportCount),...valid.slice(0,2)]:[]),...valid]){if(chosen.size>=requiredSampleCount)break;chosen.add(row);}
   const references=[...chosen].sort((a,b)=>valid.indexOf(a)-valid.indexOf(b)).map(row=>({...row,listingDays:ages[valid.indexOf(row)].listingDays,priceSupportCount:row===anchor?supporters.length:undefined,evidenceRole:row===anchor?(supportBasis==='listing-age'?'aged-anchor':supportBasis==='target-price'?'target-price-anchor':'anchor'):supporters.includes(row)?'support':anchor&&row.converted.totalCents<price?'isolated':'comparison'}));
-  return {strategy:'supported-lowest-95',requiredSupportCount,supportBasis,anchorListingDays,count:references.length,exactCount:references.filter(isExact).length,availableCount:valid.length,rough:valid.length<5||supportBasis==='listing-age'||supportBasis==='target-price',excluded,supportedPriceCents:price,supportCount:supporters.length,lowestPriceCents:valid[0]?.converted.totalCents??null,isolatedLowCents:index>0?valid[0].converted.totalCents:null,estimateCents:price===null?null:Math.round(price*95/100),references,error:anchor?'':valid.length<2?'不足 2 件有效样本，且缺少超过 7 天的挂牌依据':'报价分散且缺少挂牌时长依据，暂缺可靠估价'};
+  return {strategy:'supported-lowest-95',requiredSampleCount,requiredSupportCount,supportBasis,anchorListingDays,count:references.length,exactCount:references.filter(isExact).length,availableCount:valid.length,rough:valid.length<requiredSampleCount||supportBasis==='listing-age'||supportBasis==='target-price',excluded,supportedPriceCents:price,supportCount:supporters.length,lowestPriceCents:valid[0]?.converted.totalCents??null,isolatedLowCents:index>0?valid[0].converted.totalCents:null,estimateCents:price===null?null:Math.round(price*95/100),references,error:anchor?'':valid.length<2?'不足 2 件有效样本，且缺少超过 7 天的挂牌依据':'报价分散且缺少挂牌时长依据，暂缺可靠估价'};
  }
  function estimateComparables(target,samples,rules,quotes,value=defaults(),now=Date.now()){
   const exact=supportedComparables(target,samples,rules,quotes,value,similar,now);if(exact.count)return {...exact,degraded:false,ignoredEffects:[]};
@@ -398,9 +407,12 @@
   const physical=targets.some(t=>physicalTotal(t,rules)),additions=[...new Set(targets.flatMap(t=>positiveAdditionKeys(t,physicalTotal(t,rules))))];if(additions.length)next.sumAttributes=additions;else delete next.sumAttributes;
   for(const key of Object.keys(METRICS))delete next[key];delete next.sumMinimum;
   for(const rule of rules.filter(r=>Object.hasOwn(METRICS,r.key)&&!(physical&&['totalDamage','initialDamageIncludingHit','initialDamageExcludingHit','damage'].includes(r.key)))){const values=targets.map(t=>metricBounds(t,rule)[0]).filter(Number.isFinite);if(values.length)next[rule.key]=Math.max(0,Math.min(...values));}
+  if(physical){const floors=targets.map(target=>{const rule=actualComparisonRules(target,rules).find(r=>r.physicalPower);return rule?{key:rule.key,value:Math.max(0,Math.floor(metricBounds(target,rule)[0]-.67*PHYSICAL_POWER_SPLIT))}:null;}).filter(Boolean);for(const key of new Set(floors.map(r=>r.key)))next[key]=Math.min(...floors.filter(r=>r.key===key).map(r=>r.value));}
   // Share one broad sum query across actual combinations. Type identity and
   // per-item point tolerances are checked locally before a sample can count.
   if(additions.length){const sums=targets.map(t=>actualAdditionKeys(t).filter(k=>!physicalTotal(t,rules)||k!=='power').reduce((n,key)=>n+metrics(t)['addon:'+key],0)-2);next.sumMinimum=Math.max(0,Math.min(...sums));}
+  if(filters.physicalPowerOverflow){for(const key of Object.keys(METRICS))delete next[key];next.sumAttributes=['power'];next.sumMinimum=PHYSICAL_POWER_SPLIT+1;}
+  delete next.physicalPowerOverflow;
   return next;
  }
  function cheapestComparable(target,samples,rules,quotes,value=defaults()){
@@ -409,5 +421,5 @@
   valid.sort((a,b)=>a.converted.totalCents-b.converted.totalCents||a.sample.price-b.sample.price||String(a.sample.id).localeCompare(String(b.sample.id)));
   return {count:valid.length,excluded,best:valid[0]||null};
  }
- return {CLOCK_PRICE_GROUPS,clockPricePeers,targetAskingCents,physicalTotal,positiveAdditionKeys,gemCountsForItem,inferGemCounts,restoreInitialMetrics,isMixedGems,mixedGemWarning,isRoleExclusive,skipReason,supportedPrices,IMPORTANT_SUITS,SUIT_ATTRIBUTE_GROUPS,SUIT_VALUE_GROUPS,comparisonSuits,importantSuits,materialMaxGrade,marketGrades,MARKET_GRADES,resolveMaterialPrice,MATERIALS,materialUnits,materialPrice,repairFailures,repairSampleMax,repairGroup,attributeFocus,actualAdditionKeys,actualComparisonRules,ruleValue,listingDiscount,suggestedPrice,NECKLACE_SPIRIT_RANGES,metricBounds,exactAttributes,COMPARISON_VERSION,STORAGE_KEY,GEM_TYPES,WEAPON_GROUPS,defaults,settings,load,save,repairFactor,holeValue,capGemValue,gemValue,evaluate,expandFilters,sampleBase,confidence,summarize,groups,METRICS,comparisonRules,metrics,comparisons,similar,comparisonFilters,cheapestComparable,IMPORTANT_EFFECTS,IMPORTANT_SKILLS,importantTraits,traitKey,parameterKey,targetBox,rangeCovers,planRanges,averageComparables,supportedComparables,DOWNGRADABLE_EFFECTS,downgradeVariants,downgradeTier,estimateComparables};
+ return {PHYSICAL_POWER_SPLIT,enforceRoughValidity,sampleRequirement,CLOCK_PRICE_GROUPS,clockPricePeers,targetAskingCents,physicalTotal,positiveAdditionKeys,gemCountsForItem,inferGemCounts,restoreInitialMetrics,isMixedGems,mixedGemWarning,isRoleExclusive,skipReason,supportedPrices,IMPORTANT_SUITS,SUIT_ATTRIBUTE_GROUPS,SUIT_VALUE_GROUPS,comparisonSuits,importantSuits,materialMaxGrade,marketGrades,MARKET_GRADES,resolveMaterialPrice,MATERIALS,materialUnits,materialPrice,repairFailures,repairSampleMax,repairGroup,attributeFocus,actualAdditionKeys,actualComparisonRules,ruleValue,listingDiscount,suggestedPrice,NECKLACE_SPIRIT_RANGES,metricBounds,exactAttributes,COMPARISON_VERSION,STORAGE_KEY,GEM_TYPES,WEAPON_GROUPS,defaults,settings,load,save,repairFactor,holeValue,capGemValue,gemValue,evaluate,expandFilters,sampleBase,confidence,summarize,groups,METRICS,comparisonRules,metrics,comparisons,similar,comparisonFilters,cheapestComparable,IMPORTANT_EFFECTS,IMPORTANT_SKILLS,importantTraits,traitKey,parameterKey,targetBox,rangeCovers,planRanges,averageComparables,supportedComparables,DOWNGRADABLE_EFFECTS,downgradeVariants,downgradeTier,estimateComparables};
 });

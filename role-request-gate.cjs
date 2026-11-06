@@ -8,7 +8,7 @@ class RoleRequestGate{
  block(id,message){const p=this.pool(id);p.blocked=message;if(p.timer){clearTimeout(p.timer);p.timer=null;}for(const item of p.pending.splice(0)){item.cleanup();this.releaseTask(p,item.taskId);item.reject(Error(message));}}
  async probe(id,operation,{signal}={}){
   const p=this.pool(id);if(p.active||p.pending.length||p.probing)throw Error('该角色正在请求，请稍候再检查');
-  if(p.blocked&&!/CAPTCHA_AUTH|MIBAO_AUTH|OTP_AUTH|验证码|验证/.test(p.blocked))throw Error(p.blocked);
+  if(p.blocked&&!/CAPTCHA_AUTH|MIBAO_AUTH|OTP_AUTH|ACCOUNT_RESTRICTED|保护性冻结|账号冻结|帐号冻结|验证码|验证/.test(p.blocked))throw Error(p.blocked);
   p.probing=true;p.active++;
   try{const wait=Math.max(0,p.nextStart-this.now());if(wait)await new Promise((resolve,reject)=>{let timer;const abort=()=>{clearTimeout(timer);reject(signal.reason);};timer=setTimeout(()=>{signal?.removeEventListener('abort',abort);resolve();},wait);signal?.addEventListener('abort',abort,{once:true});});signal?.throwIfAborted();p.nextStart=this.now()+this.minInterval;return await operation();}
   finally{p.probing=false;p.active--;this.pump(id);}

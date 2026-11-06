@@ -27,7 +27,7 @@ function isCaptchaResponse(text){
   if(!data||typeof data!=='object'||Array.isArray(data))return false;
   const code=String(data.status_code||data.code||'');
   if(/^CAPTCHA_AUTH$/i.test(code))return true;
-  if(/^(MIBAO_AUTH|OTP_AUTH)$/i.test(code))return false;
+  if(/^(MIBAO_AUTH|OTP_AUTH|ACCOUNT_RESTRICTED)$/i.test(code))return false;
   return ['0','false','-1'].includes(String(data.status))&&/请输入验证码|需要.{0,8}验证|验证码校验/.test(String(data.msg||data.message||''));
  }catch{
   // Shared scripts, comments and form placeholders are not verification responses.
@@ -171,7 +171,7 @@ function createServer({upstreamFetch=globalThis.fetch,officialFetch=(roleId,url,
     const upstream=await officialFetch(task.roleId,url,{method:'GET',headers,redirect:'error',signal:controller.signal});
     let body=Buffer.from(await upstream.arrayBuffer());
     const inferred=inferredAccountSecurity(body.toString('utf8'));if(inferred)body=Buffer.from(JSON.stringify(inferred));
-    if(/MIBAO_AUTH|OTP_AUTH/.test(body.toString('utf8'))){let message;try{require('./search-results.js').parseResponse(body.toString('utf8'));}catch(error){message=error.message;}requestGate.block(task.roleId,message||'可能需要将军令验证 · MIBAO_AUTH');}
+    if(/MIBAO_AUTH|OTP_AUTH|ACCOUNT_RESTRICTED/.test(body.toString('utf8'))){let message;try{require('./search-results.js').parseResponse(body.toString('utf8'));}catch(error){message=error.message;}requestGate.block(task.roleId,message||'可能需要将军令验证 · MIBAO_AUTH');}
     if(isCaptchaResponse(body.toString('utf8'))){const message='官网要求验证码，已暂停该角色的请求，请在本地完成官方安全验证后重试';requestGate.block(task.roleId,message);throw Error(message);}
     if(upstream.status===429){const message='官网返回请求过于频繁，已暂停该角色的请求，请稍后刷新Cookie再试';requestGate.block(task.roleId,message);throw Error(message);}
     return {status:upstream.status,body};
@@ -191,7 +191,7 @@ function createServer({upstreamFetch=globalThis.fetch,officialFetch=(roleId,url,
    if(res.destroyed)return;
    if(checkingVerification){if(response.status!==200)throw Error('官网请求失败：HTTP '+response.status);const parsed=require('./search-results.js').parseResponse(response.body.toString('utf8'));requestGate.resume(task.roleId);if(roleManager.event)await roleManager.event('verification_check_success',task.roleId,task.id,'实际请求已恢复，不再需要验证');const role=roleManager.public&&roleManager.get?roleManager.public(await roleManager.get(task.roleId)):null;json(res,200,{available:true,requiresVerification:false,role:role?{...role,requestQueue:requestGate.snapshot(task.roleId)}:null});return;}
    send(res,200,response.body,{'X-Upstream-Status':String(response.status),'X-Cbg-Request-Url':url,'X-Session-Refreshed':refreshed?'1':'0'});
-  }catch(error){if(!res.destroyed&&checkingVerification){const inferred=inferredAccountSecurity(error.message);if(inferred)error.message=inferred.msg+' · MIBAO_AUTH';const code=error.message.match(/MIBAO_AUTH|OTP_AUTH/)?.[0]||'';if(code)requestGate.block(checkingRoleId,error.message);json(res,200,{available:false,requiresVerification:/官网要求验证码/.test(error.message),requiresAccountSecurity:Boolean(code),code,message:error.message});return;}if(!res.destroyed){const unavailable=['OFFICIAL_PAGE_UNAVAILABLE','OFFICIAL_TEMPORARILY_UNAVAILABLE'].includes(error.code);json(res,error.name==='AbortError'?504:unavailable?503:400,{...(unavailable?{code:error.code,retryAfterSeconds:error.retryAfterSeconds||30}:{}),message:error.name==='AbortError'?'搜索请求超时或已取消':error.message},{'X-Cbg-Fatal':'1',...(unavailable?{'Retry-After':String(error.retryAfterSeconds||30)}:{})});}}
+  }catch(error){if(!res.destroyed&&checkingVerification){const inferred=inferredAccountSecurity(error.message);if(inferred)error.message=inferred.msg+' · MIBAO_AUTH';const code=error.message.match(/MIBAO_AUTH|OTP_AUTH|ACCOUNT_RESTRICTED/)?.[0]||'';if(code)requestGate.block(checkingRoleId,error.message);json(res,200,{available:false,requiresVerification:/官网要求验证码/.test(error.message),requiresAccountSecurity:Boolean(code),code,message:error.message});return;}if(!res.destroyed){const unavailable=['OFFICIAL_PAGE_UNAVAILABLE','OFFICIAL_TEMPORARILY_UNAVAILABLE'].includes(error.code);json(res,error.name==='AbortError'?504:unavailable?503:400,{...(unavailable?{code:error.code,retryAfterSeconds:error.retryAfterSeconds||30}:{}),message:error.name==='AbortError'?'搜索请求超时或已取消':error.message},{'X-Cbg-Fatal':'1',...(unavailable?{'Retry-After':String(error.retryAfterSeconds||30)}:{})});}}
   finally{clearTimeout(timeout);if(activeTaskId!==null)activeRequests.delete(activeTaskId);}
  });
  let refreshTimer=null;
